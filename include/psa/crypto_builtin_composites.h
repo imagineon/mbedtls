@@ -45,8 +45,7 @@
 #endif
 
 #if defined(MBEDTLS_PSA_BUILTIN_ALG_HMAC) || defined(PSA_CRYPTO_DRIVER_TEST)
-typedef struct
-{
+typedef struct {
     /** The HMAC algorithm in use */
     psa_algorithm_t MBEDTLS_PRIVATE(alg);
     /** The hash context. */
@@ -55,16 +54,14 @@ typedef struct
     uint8_t MBEDTLS_PRIVATE(opad)[PSA_HMAC_MAX_HASH_BLOCK_SIZE];
 } mbedtls_psa_hmac_operation_t;
 
-#define MBEDTLS_PSA_HMAC_OPERATION_INIT {0, PSA_HASH_OPERATION_INIT, {0}}
+#define MBEDTLS_PSA_HMAC_OPERATION_INIT { 0, PSA_HASH_OPERATION_INIT, { 0 } }
 #endif /* MBEDTLS_PSA_BUILTIN_ALG_HMAC */
 
 #include "mbedtls/cmac.h"
 
-typedef struct
-{
+typedef struct {
     psa_algorithm_t MBEDTLS_PRIVATE(alg);
-    union
-    {
+    union {
         unsigned MBEDTLS_PRIVATE(dummy); /* Make the union non-empty even with no supported algorithms. */
 #if defined(MBEDTLS_PSA_BUILTIN_ALG_HMAC) || defined(PSA_CRYPTO_DRIVER_TEST)
         mbedtls_psa_hmac_operation_t MBEDTLS_PRIVATE(hmac);
@@ -75,19 +72,39 @@ typedef struct
     } MBEDTLS_PRIVATE(ctx);
 } mbedtls_psa_mac_operation_t;
 
-#define MBEDTLS_PSA_MAC_OPERATION_INIT {0, {0}}
+#define MBEDTLS_PSA_MAC_OPERATION_INIT { 0, { 0 } }
 
-/*
- * BEYOND THIS POINT, TEST DRIVER DECLARATIONS ONLY.
- */
-#if defined(PSA_CRYPTO_DRIVER_TEST)
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_GCM) || \
+    defined(MBEDTLS_PSA_BUILTIN_ALG_CCM) || \
+    defined(MBEDTLS_PSA_BUILTIN_ALG_CHACHA20_POLY1305)
+#define MBEDTLS_PSA_BUILTIN_AEAD  1
+#endif
 
-typedef mbedtls_psa_mac_operation_t mbedtls_transparent_test_driver_mac_operation_t;
-typedef mbedtls_psa_mac_operation_t mbedtls_opaque_test_driver_mac_operation_t;
+/* Context structure for the Mbed TLS AEAD implementation. */
+typedef struct {
+    psa_algorithm_t MBEDTLS_PRIVATE(alg);
+    psa_key_type_t MBEDTLS_PRIVATE(key_type);
 
-#define MBEDTLS_TRANSPARENT_TEST_DRIVER_MAC_OPERATION_INIT MBEDTLS_PSA_MAC_OPERATION_INIT
-#define MBEDTLS_OPAQUE_TEST_DRIVER_MAC_OPERATION_INIT MBEDTLS_PSA_MAC_OPERATION_INIT
+    unsigned int MBEDTLS_PRIVATE(is_encrypt) : 1;
 
-#endif /* PSA_CRYPTO_DRIVER_TEST */
+    uint8_t MBEDTLS_PRIVATE(tag_length);
+
+    union {
+        unsigned dummy; /* Enable easier initializing of the union. */
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_CCM)
+        mbedtls_ccm_context MBEDTLS_PRIVATE(ccm);
+#endif /* MBEDTLS_PSA_BUILTIN_ALG_CCM */
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_GCM)
+        mbedtls_gcm_context MBEDTLS_PRIVATE(gcm);
+#endif /* MBEDTLS_PSA_BUILTIN_ALG_GCM */
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_CHACHA20_POLY1305)
+        mbedtls_chachapoly_context MBEDTLS_PRIVATE(chachapoly);
+#endif /* MBEDTLS_PSA_BUILTIN_ALG_CHACHA20_POLY1305 */
+
+    } ctx;
+
+} mbedtls_psa_aead_operation_t;
+
+#define MBEDTLS_PSA_AEAD_OPERATION_INIT { 0, 0, 0, 0, { 0 } }
 
 #endif /* PSA_CRYPTO_BUILTIN_COMPOSITES_H */
