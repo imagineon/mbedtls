@@ -425,7 +425,7 @@ int main(void)
     "    reconnect=%%d        number of reconnections using session resumption\n" \
     "                        default: 0 (disabled)\n"       \
     "    reco_server_name=%%s  default: NULL\n"             \
-    "    reco_delay=%%d       default: 0 millionseconds\n"         \
+    "    reco_delay=%%d       default: 0 milliseconds\n"         \
     "    reco_mode=%%d        0: copy session, 1: serialize session\n" \
     "                        default: 1\n"      \
     "    reconnect_hard=%%d   default: 0 (disabled)\n"      \
@@ -867,7 +867,7 @@ int main(int argc, char *argv[])
     mbedtls_test_enable_insecure_external_rng();
 #endif  /* MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG */
 
-    if (argc == 0) {
+    if (argc < 2) {
 usage:
         if (ret == 0) {
             ret = 1;
