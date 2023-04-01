@@ -55,7 +55,8 @@
  *      library/padlock.h
  *
  * Required by:
- *      MBEDTLS_AESNI_C
+ *      MBEDTLS_AESCE_C
+ *      MBEDTLS_AESNI_C (on some platforms)
  *      MBEDTLS_PADLOCK_C
  *
  * Comment to disable the use of assembly code.
@@ -237,6 +238,7 @@
 //#define MBEDTLS_PLATFORM_VSNPRINTF_ALT
 //#define MBEDTLS_PLATFORM_NV_SEED_ALT
 //#define MBEDTLS_PLATFORM_SETUP_TEARDOWN_ALT
+//#define MBEDTLS_PLATFORM_MS_TIME_ALT
 
 /**
  * \def MBEDTLS_DEPRECATED_WARNING
@@ -800,7 +802,7 @@
  *
  * Enable the ECDHE-PSK based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C
+ * Requires: MBEDTLS_ECDH_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDH)
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -898,7 +900,9 @@
  *
  * Enable the ECDHE-RSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C, MBEDTLS_RSA_C, MBEDTLS_PKCS1_V15,
+ * Requires: MBEDTLS_ECDH_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDH)
+ *           MBEDTLS_RSA_C
+ *           MBEDTLS_PKCS1_V15
  *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
@@ -921,7 +925,9 @@
  *
  * Enable the ECDHE-ECDSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C, MBEDTLS_ECDSA_C, MBEDTLS_X509_CRT_PARSE_C,
+ * Requires: MBEDTLS_ECDH_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDH)
+ *           MBEDTLS_ECDSA_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDSA)
+ *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -943,7 +949,9 @@
  *
  * Enable the ECDH-ECDSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C, MBEDTLS_ECDSA_C, MBEDTLS_X509_CRT_PARSE_C
+ * Requires: MBEDTLS_ECDH_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDH)
+ *           MBEDTLS_ECDSA_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDSA)
+ *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -965,7 +973,9 @@
  *
  * Enable the ECDH-RSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C, MBEDTLS_RSA_C, MBEDTLS_X509_CRT_PARSE_C
+ * Requires: MBEDTLS_ECDH_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDH)
+ *           MBEDTLS_RSA_C
+ *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -991,9 +1001,13 @@
  * Thread v1.0.0 specification; incompatible changes to the specification
  * might still happen. For this reason, this is disabled by default.
  *
- * Requires: MBEDTLS_ECJPAKE_C
- *           SHA-256 (via MD if present, or via PSA, see MBEDTLS_ECJPAKE_C)
+ * Requires: MBEDTLS_ECJPAKE_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_JPAKE)
+ *           SHA-256 (via MBEDTLS_SHA256_C or a PSA driver)
  *           MBEDTLS_ECP_DP_SECP256R1_ENABLED
+ *
+ * \warning If SHA-256 is provided only by a PSA driver, you must call
+ * psa_crypto_init() before the first hanshake (even if
+ * MBEDTLS_USE_PSA_CRYPTO is disabled).
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -1175,15 +1189,10 @@
  *
  * Enable support for PKCS#1 v2.1 encoding.
  *
- * Requires: MBEDTLS_RSA_C and (MBEDTLS_MD_C or MBEDTLS_PSA_CRYPTO_C).
+ * Requires: MBEDTLS_RSA_C
  *
- * \warning If building without MBEDTLS_MD_C, you must call psa_crypto_init()
- * before doing any PKCS#1 v2.1 operation.
- *
- * \warning When building with MBEDTLS_MD_C, all hashes used with this
- * need to be available as built-ins (that is, for SHA-256, MBEDTLS_SHA256_C,
- * etc.) as opposed to just PSA drivers. So far, PSA drivers are only used by
- * this module in builds where MBEDTLS_MD_C is disabled.
+ * \warning If using a hash that is only provided by PSA drivers, you must
+ * call psa_crypto_init() before doing any PKCS#1 v2.1 operation.
  *
  * This enables support for RSAES-OAEP and RSASSA-PSS operations.
  */
@@ -1567,13 +1576,14 @@
  * Enable support for TLS 1.2 (and DTLS 1.2 if DTLS is enabled).
  *
  * Requires: Without MBEDTLS_USE_PSA_CRYPTO: MBEDTLS_MD_C and
- *              (MBEDTLS_SHA1_C or MBEDTLS_SHA256_C or MBEDTLS_SHA512_C)
+ *              (MBEDTLS_SHA256_C or MBEDTLS_SHA384_C or
+ *               SHA-256 or SHA-512 provided by a PSA driver)
  *           With MBEDTLS_USE_PSA_CRYPTO:
- *              PSA_WANT_ALG_SHA_1 or PSA_WANT_ALG_SHA_256 or
- *              PSA_WANT_ALG_SHA_512
+ *              PSA_WANT_ALG_SHA_256 or PSA_WANT_ALG_SHA_384
  *
- * \warning If building with MBEDTLS_USE_PSA_CRYPTO, you must call
- * psa_crypto_init() before doing any TLS operations.
+ * \warning If building with MBEDTLS_USE_PSA_CRYPTO, or if the hash(es) used
+ * are only provided by PSA drivers, you must call psa_crypto_init() before
+ * doing any TLS operations.
  *
  * Comment this macro to disable support for TLS 1.2 / DTLS 1.2
  */
@@ -1644,8 +1654,11 @@
  *
  * Enable TLS 1.3 ephemeral key exchange mode.
  *
- * Requires: MBEDTLS_ECDH_C, MBEDTLS_X509_CRT_PARSE_C, MBEDTLS_ECDSA_C or
- *           MBEDTLS_PKCS1_V21
+ * Requires: PSA_WANT_ALG_ECDH
+ *           MBEDTLS_X509_CRT_PARSE_C
+ *           and at least one of:
+ *               MBEDTLS_ECDSA_C or (MBEDTLS_USE_PSA_CRYPTO and PSA_WANT_ALG_ECDSA)
+ *               MBEDTLS_PKCS1_V21
  *
  * Comment to disable support for the ephemeral key exchange mode in TLS 1.3.
  * If MBEDTLS_SSL_PROTO_TLS1_3 is not enabled, this option does not have any
@@ -1659,7 +1672,7 @@
  *
  * Enable TLS 1.3 PSK ephemeral key exchange mode.
  *
- * Requires: MBEDTLS_ECDH_C
+ * Requires: PSA_WANT_ALG_ECDH
  *
  * Comment to disable support for the PSK ephemeral key exchange mode in
  * TLS 1.3. If MBEDTLS_SSL_PROTO_TLS1_3 is not enabled, this option does not
@@ -1921,19 +1934,25 @@
 /**
  * \def MBEDTLS_USE_PSA_CRYPTO
  *
- * Make the X.509 and TLS library use PSA for cryptographic operations, and
- * enable new APIs for using keys handled by PSA Crypto.
+ * Make the X.509 and TLS libraries use PSA for cryptographic operations as
+ * much as possible, and enable new APIs for using keys handled by PSA Crypto.
  *
  * \note Development of this option is currently in progress, and parts of Mbed
  * TLS's X.509 and TLS modules are not ported to PSA yet. However, these parts
  * will still continue to work as usual, so enabling this option should not
  * break backwards compatibility.
  *
- * \note See docs/use-psa-crypto.md for a complete description of what this
- * option currently does, and of parts that are not affected by it so far.
- *
  * \warning If you enable this option, you need to call `psa_crypto_init()`
  * before calling any function from the SSL/TLS, X.509 or PK modules.
+ *
+ * \note An important and desirable effect of this option is that it allows
+ * PK, X.509 and TLS to take advantage of PSA drivers. For example, enabling
+ * this option is what allows use of drivers for ECDSA, ECDH and EC J-PAKE in
+ * those modules. However, note that even with this option disabled, some code
+ * in PK, X.509, TLS or the crypto library might still use PSA drivers, if it
+ * can determine it's safe to do so; currently that's the case for hashes.
+ *
+ * \note See docs/use-psa-crypto.md for a complete description this option.
  *
  * Requires: MBEDTLS_PSA_CRYPTO_C.
  *
@@ -2032,31 +2051,50 @@
 /**
  * \def MBEDTLS_AESNI_C
  *
- * Enable AES-NI support on x86-64.
+ * Enable AES-NI support on x86-64 or x86-32.
+ *
+ * \note AESNI is only supported with certain compilers and target options:
+ * - Visual Studio 2013: supported.
+ * - GCC, x86-64, target not explicitly supporting AESNI:
+ *   requires MBEDTLS_HAVE_ASM.
+ * - GCC, x86-32, target not explicitly supporting AESNI:
+ *   not supported.
+ * - GCC, x86-64 or x86-32, target supporting AESNI: supported.
+ *   For this assembly-less implementation, you must currently compile
+ *   `library/aesni.c` and `library/aes.c` with machine options to enable
+ *   SSE2 and AESNI instructions: `gcc -msse2 -maes -mpclmul` or
+ *   `clang -maes -mpclmul`.
+ * - Non-x86 targets: this option is silently ignored.
+ * - Other compilers: this option is silently ignored.
+ *
+ * \note
+ * Above, "GCC" includes compatible compilers such as Clang.
+ * The limitations on target support are likely to be relaxed in the future.
  *
  * Module:  library/aesni.c
  * Caller:  library/aes.c
  *
- * Requires: MBEDTLS_HAVE_ASM
+ * Requires: MBEDTLS_HAVE_ASM (on some platforms, see note)
  *
- * This modules adds support for the AES-NI instructions on x86-64
+ * This modules adds support for the AES-NI instructions on x86.
  */
 #define MBEDTLS_AESNI_C
 
 /**
  * \def MBEDTLS_AESCE_C
  *
- * Enable AES crypto extension support on Arm64.
+ * Enable AES cryptographic extension support on 64-bit Arm.
  *
  * Module:  library/aesce.c
  * Caller:  library/aes.c
  *
  * Requires: MBEDTLS_HAVE_ASM, MBEDTLS_AES_C
  *
- * \warning Runtime detection only works on linux. For non-linux operation
- *          system, crypto extension MUST be supported by CPU.
+ * \warning Runtime detection only works on Linux. For non-Linux operating
+ *          system, Armv8-A Cryptographic Extensions must be supported by
+ *          the CPU when this option is enabled.
  *
- * This module adds support for the AES crypto instructions on Arm64
+ * This module adds support for the AES Armv8-A Cryptographic Extensions on Aarch64 systems.
  */
 #define MBEDTLS_AESCE_C
 
@@ -2502,13 +2540,8 @@
  *
  * Requires: MBEDTLS_ECP_C and either MBEDTLS_MD_C or MBEDTLS_PSA_CRYPTO_C
  *
- * \warning If building without MBEDTLS_MD_C, you must call psa_crypto_init()
- * before doing any EC J-PAKE operations.
- *
- * \warning When building with MBEDTLS_MD_C, all hashes used with this
- * need to be available as built-ins (that is, for SHA-256, MBEDTLS_SHA256_C,
- * etc.) as opposed to just PSA drivers. So far, PSA drivers are only used by
- * this module in builds where MBEDTLS_MD_C is disabled.
+ * \warning If using a hash that is only provided by PSA drivers, you must
+ * call psa_crypto_init() before doing any EC J-PAKE operations.
  */
 #define MBEDTLS_ECJPAKE_C
 
@@ -2642,7 +2675,8 @@
  *
  * Requires: one of: MBEDTLS_MD5_C, MBEDTLS_RIPEMD160_C, MBEDTLS_SHA1_C,
  *                   MBEDTLS_SHA224_C, MBEDTLS_SHA256_C, MBEDTLS_SHA384_C,
- *                   MBEDTLS_SHA512_C.
+ *                   MBEDTLS_SHA512_C, or MBEDTLS_PSA_CRYPTO_C with at least
+ *                   one hash.
  * Module:  library/md.c
  * Caller:  library/constant_time.c
  *          library/ecdsa.c
@@ -2773,6 +2807,10 @@
  *          library/x509_csr.c
  *
  * Requires: MBEDTLS_BASE64_C
+ *           optionally MBEDTLS_MD5_C, or PSA Crypto with MD5 (see below)
+ *
+ * \warning When parsing password-protected files, if MD5 is provided only by
+ * a PSA driver, you must call psa_crypto_init() before the first file.
  *
  * This modules adds support for decoding / parsing PEM files.
  */
@@ -2848,15 +2886,11 @@
  *
  * Module:  library/pkcs5.c
  *
- * Requires: MBEDTLS_CIPHER_C and either MBEDTLS_MD_C or MBEDTLS_PSA_CRYPTO_C.
+ * Requires: MBEDTLS_CIPHER_C
+ * Auto-enables: MBEDTLS_MD_C
  *
- * \warning If building without MBEDTLS_MD_C, you must call psa_crypto_init()
- * before doing any PKCS5 operation.
- *
- * \warning When building with MBEDTLS_MD_C, all hashes used with this
- * need to be available as built-ins (that is, for SHA-256, MBEDTLS_SHA256_C,
- * etc.) as opposed to just PSA drivers. So far, PSA drivers are only used by
- * this module in builds where MBEDTLS_MD_C is disabled.
+ * \warning If using a hash that is only provided by PSA drivers, you must
+ * call psa_crypto_init() before doing any PKCS5 operations.
  *
  * This module adds support for the PKCS#5 functions.
  */
@@ -2890,13 +2924,8 @@
  * Requires: MBEDTLS_ASN1_PARSE_C, MBEDTLS_CIPHER_C and either
  * MBEDTLS_MD_C or MBEDTLS_PSA_CRYPTO_C.
  *
- * \warning If building without MBEDTLS_MD_C, you must call psa_crypto_init()
- * before doing any PKCS12 operation.
- *
- * \warning When building with MBEDTLS_MD_C, all hashes used with this
- * need to be available as built-ins (that is, for SHA-256, MBEDTLS_SHA256_C,
- * etc.) as opposed to just PSA drivers. So far, PSA drivers are only used by
- * this module in builds where MBEDTLS_MD_C is disabled.
+ * \warning If using a hash that is only provided by PSA drivers, you must
+ * call psa_crypto_init() before doing any PKCS12 operations.
  *
  * This module enables PKCS#12 functions.
  */
@@ -3647,6 +3676,8 @@
 //#define MBEDTLS_PLATFORM_VSNPRINTF_MACRO    vsnprintf /**< Default vsnprintf macro to use, can be undefined */
 //#define MBEDTLS_PLATFORM_NV_SEED_READ_MACRO   mbedtls_platform_std_nv_seed_read /**< Default nv_seed_read function to use, can be undefined */
 //#define MBEDTLS_PLATFORM_NV_SEED_WRITE_MACRO  mbedtls_platform_std_nv_seed_write /**< Default nv_seed_write function to use, can be undefined */
+//#define MBEDTLS_PLATFORM_MS_TIME_TYPE_MACRO   int64_t //#define MBEDTLS_PLATFORM_MS_TIME_TYPE_MACRO   int64_t /**< Default milliseconds time macro to use, can be undefined. MBEDTLS_HAVE_TIME must be enabled. It must be signed, and at least 64 bits. If it is changed from the default, MBEDTLS_PRINTF_MS_TIME must be updated to match.*/
+//#define MBEDTLS_PRINTF_MS_TIME    PRId64 /**< Default fmt for printf. That's avoid compiler warning if mbedtls_ms_time_t is redefined */
 
 /** \def MBEDTLS_CHECK_RETURN
  *
@@ -3789,7 +3820,7 @@
  */
 //#define MBEDTLS_SSL_DTLS_MAX_BUFFERING             32768
 
-//#define MBEDTLS_PSK_MAX_LEN               32 /**< Max size of TLS pre-shared keys, in bytes (default 256 bits) */
+//#define MBEDTLS_PSK_MAX_LEN               32 /**< Max size of TLS pre-shared keys, in bytes (default 256 or 384 bits) */
 //#define MBEDTLS_SSL_COOKIE_TIMEOUT        60 /**< Default expiration delay of DTLS cookies, in seconds if HAVE_TIME, or in number of cookies issued */
 
 /**

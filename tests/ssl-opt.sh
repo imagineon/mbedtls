@@ -284,6 +284,12 @@ TLS1_2_KEY_EXCHANGES_WITH_CERT="MBEDTLS_KEY_EXCHANGE_RSA_ENABLED \
 TLS1_2_KEY_EXCHANGES_WITH_ECDSA_CERT="MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED \
                                       MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED"
 
+TLS1_2_KEY_EXCHANGES_WITH_CERT_WO_ECDH="MBEDTLS_KEY_EXCHANGE_RSA_ENABLED \
+                                       MBEDTLS_KEY_EXCHANGE_DHE_RSA_ENABLED \
+                                       MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED \
+                                       MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED \
+                                       MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED"
+
 requires_key_exchange_with_cert_in_tls12_or_tls13_enabled() {
     if $P_QUERY -all MBEDTLS_SSL_PROTO_TLS1_2
     then
@@ -368,48 +374,66 @@ requires_ciphersuite_enabled() {
 # - $1 = command line (call to a TLS client or server program)
 # - $2 = client/server
 # - $3 = TLS version (TLS12 or TLS13)
-# - $4 = run test options
+# - $4 = Use an external tool without ECDH support
+# - $5 = run test options
 detect_required_features() {
-    case "$1" in
+    CMD_LINE=$1
+    ROLE=$2
+    TLS_VERSION=$3
+    EXT_WO_ECDH=$4
+    TEST_OPTIONS=${5:-}
+
+    case "$CMD_LINE" in
         *\ force_version=*)
-            tmp="${1##*\ force_version=}"
+            tmp="${CMD_LINE##*\ force_version=}"
             tmp="${tmp%%[!-0-9A-Z_a-z]*}"
             requires_protocol_version "$tmp";;
     esac
 
-    case "$1" in
+    case "$CMD_LINE" in
         *\ force_ciphersuite=*)
-            tmp="${1##*\ force_ciphersuite=}"
+            tmp="${CMD_LINE##*\ force_ciphersuite=}"
             tmp="${tmp%%[!-0-9A-Z_a-z]*}"
             requires_ciphersuite_enabled "$tmp";;
     esac
 
-    case " $1 " in
+    case " $CMD_LINE " in
         *[-_\ =]tickets=[^0]*)
             requires_config_enabled MBEDTLS_SSL_TICKET_C;;
     esac
-    case " $1 " in
+    case " $CMD_LINE " in
         *[-_\ =]alpn=*)
             requires_config_enabled MBEDTLS_SSL_ALPN;;
     esac
 
-    case "$1" in
+    case "$CMD_LINE" in
         *server5*|\
         *server7*|\
         *dir-maxpath*)
-            if [ "$3" = "TLS13" ]; then
+            if [ "$TLS_VERSION" = "TLS13" ]; then
                 # In case of TLS13 the support for ECDSA is enough
                 requires_pk_alg "ECDSA"
             else
                 # For TLS12 requirements are different between server and client
-                if [ "$2" = "server" ]; then
+                if [ "$ROLE" = "server" ]; then
                     # If the server uses "server5*" certificates, then an ECDSA based
-                    # key exchange is required
-                    requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_ECDSA_CERT
-                elif [ "$2" = "client" ]; then
-                    # Otherwise for the client it is enough to have any certificate
-                    # based authentication + support for ECDSA
-                    requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT
+                    # key exchange is required. However gnutls also does not
+                    # support ECDH, so this limit the choice to ECDHE-ECDSA
+                    if [ "$EXT_WO_ECDH" = "yes" ]; then
+                        requires_any_configs_enabled MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+                    else
+                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_ECDSA_CERT
+                    fi
+                elif [ "$ROLE" = "client" ]; then
+                    # On the client side it is enough to have any certificate
+                    # based authentication together with support for ECDSA.
+                    # Of course the GnuTLS limitation mentioned above applies
+                    # also here.
+                    if [ "$EXT_WO_ECDH" = "yes" ]; then
+                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT_WO_ECDH
+                    else
+                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT
+                    fi
                     requires_pk_alg "ECDSA"
                 fi
             fi
@@ -1102,6 +1126,28 @@ is_gnutls() {
     esac
 }
 
+# Some external tools (gnutls or openssl) might not have support for static ECDH
+# and this limit the tests that can be run with them. This function checks server
+# and client command lines, given as input, to verify if the current test
+# is using one of these tools.
+use_ext_tool_without_ecdh_support() {
+    case "$1" in
+        *$GNUTLS_SERV*|\
+        *${GNUTLS_NEXT_SERV:-"gnutls-serv-dummy"}*|\
+        *${OPENSSL_NEXT:-"openssl-dummy"}*)
+                echo "yes"
+                return;;
+    esac
+    case "$2" in
+        *$GNUTLS_CLI*|\
+        *${GNUTLS_NEXT_CLI:-"gnutls-cli-dummy"}*|\
+        *${OPENSSL_NEXT:-"openssl-dummy"}*)
+                echo "yes"
+                return;;
+    esac
+    echo "no"
+}
+
 # Generate random psk_list argument for ssl_server2
 get_srv_psk_list ()
 {
@@ -1528,8 +1574,12 @@ run_test() {
     # If the client or server requires certain features that can be detected
     # from their command-line arguments, check that they're enabled.
     TLS_VERSION=$(get_tls_version "$SRV_CMD" "$CLI_CMD")
-    detect_required_features "$SRV_CMD" "server" "$TLS_VERSION" "$@"
-    detect_required_features "$CLI_CMD" "client" "$TLS_VERSION" "$@"
+
+    # Check if we are trying to use an external tool wich does not support ECDH
+    EXT_WO_ECDH=$(use_ext_tool_without_ecdh_support "$SRV_CMD" "$CLI_CMD")
+
+    detect_required_features "$SRV_CMD" "server" "$TLS_VERSION" "$EXT_WO_ECDH" "$@"
+    detect_required_features "$CLI_CMD" "client" "$TLS_VERSION" "$EXT_WO_ECDH" "$@"
 
     # If we're in a PSK-only build and the test can be adapted to PSK, do that.
     maybe_adapt_for_psk "$@"
@@ -9468,7 +9518,7 @@ run_test    "DTLS reassembly: no fragmentation (openssl server)" \
 
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "DTLS reassembly: some fragmentation (openssl server)" \
-            "$O_SRV -dtls -mtu 768" \
+            "$O_SRV -dtls -mtu 256" \
             "$P_CLI dtls=1 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
@@ -11477,6 +11527,20 @@ run_test    "TLS 1.3: Test gnutls tls1_3 feature" \
             -c "Version: TLS1.3"
 
 # TLS1.3 test cases
+requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_3
+requires_config_enabled MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
+requires_ciphersuite_enabled TLS1-3-CHACHA20-POLY1305-SHA256
+requires_config_enabled MBEDTLS_ECP_DP_CURVE25519_ENABLED
+requires_config_enabled MBEDTLS_ECP_DP_SECP256R1_ENABLED
+run_test    "TLS 1.3: Default" \
+            "$P_SRV allow_sha1=0 debug_level=3 crt_file=data_files/server5.crt key_file=data_files/server5.key force_version=tls13" \
+            "$P_CLI allow_sha1=0" \
+            0 \
+            -s "Protocol is TLSv1.3" \
+            -s "Ciphersuite is TLS1-3-CHACHA20-POLY1305-SHA256" \
+            -s "ECDH group: x25519" \
+            -s "selected signature algorithm ecdsa_secp256r1_sha256"
+
 requires_openssl_tls1_3
 requires_config_enabled MBEDTLS_DEBUG_C
 requires_config_enabled MBEDTLS_SSL_CLI_C
@@ -11497,7 +11561,7 @@ run_test    "TLS 1.3: minimal feature sets - openssl" \
             -c "client state: MBEDTLS_SSL_FLUSH_BUFFERS" \
             -c "client state: MBEDTLS_SSL_HANDSHAKE_WRAPUP" \
             -c "<= ssl_tls13_process_server_hello" \
-            -c "server hello, chosen ciphersuite: ( 1301 ) - TLS1-3-AES-128-GCM-SHA256" \
+            -c "server hello, chosen ciphersuite: ( 1303 ) - TLS1-3-CHACHA20-POLY1305-SHA256" \
             -c "ECDH curve: x25519" \
             -c "=> ssl_tls13_process_server_hello" \
             -c "<= parse encrypted extensions" \
@@ -11531,7 +11595,7 @@ run_test    "TLS 1.3: minimal feature sets - gnutls" \
             -c "client state: MBEDTLS_SSL_FLUSH_BUFFERS" \
             -c "client state: MBEDTLS_SSL_HANDSHAKE_WRAPUP" \
             -c "<= ssl_tls13_process_server_hello" \
-            -c "server hello, chosen ciphersuite: ( 1301 ) - TLS1-3-AES-128-GCM-SHA256" \
+            -c "server hello, chosen ciphersuite: ( 1303 ) - TLS1-3-CHACHA20-POLY1305-SHA256" \
             -c "ECDH curve: x25519" \
             -c "=> ssl_tls13_process_server_hello" \
             -c "<= parse encrypted extensions" \
@@ -11564,7 +11628,7 @@ run_test    "TLS 1.3: alpn - openssl" \
             -c "client state: MBEDTLS_SSL_FLUSH_BUFFERS" \
             -c "client state: MBEDTLS_SSL_HANDSHAKE_WRAPUP" \
             -c "<= ssl_tls13_process_server_hello" \
-            -c "server hello, chosen ciphersuite: ( 1301 ) - TLS1-3-AES-128-GCM-SHA256" \
+            -c "server hello, chosen ciphersuite: ( 1303 ) - TLS1-3-CHACHA20-POLY1305-SHA256" \
             -c "ECDH curve: x25519" \
             -c "=> ssl_tls13_process_server_hello" \
             -c "<= parse encrypted extensions" \
@@ -11600,7 +11664,7 @@ run_test    "TLS 1.3: alpn - gnutls" \
             -c "client state: MBEDTLS_SSL_FLUSH_BUFFERS" \
             -c "client state: MBEDTLS_SSL_HANDSHAKE_WRAPUP" \
             -c "<= ssl_tls13_process_server_hello" \
-            -c "server hello, chosen ciphersuite: ( 1301 ) - TLS1-3-AES-128-GCM-SHA256" \
+            -c "server hello, chosen ciphersuite: ( 1303 ) - TLS1-3-CHACHA20-POLY1305-SHA256" \
             -c "ECDH curve: x25519" \
             -c "=> ssl_tls13_process_server_hello" \
             -c "<= parse encrypted extensions" \
@@ -13237,6 +13301,31 @@ run_test    "TLS 1.3: NewSessionTicket: Basic check, G->m" \
             0 \
             -c "Connecting again- trying to resume previous session" \
             -c "NEW SESSION TICKET (4) was received" \
+            -s "=> write NewSessionTicket msg" \
+            -s "server state: MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET" \
+            -s "server state: MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET_FLUSH" \
+            -s "key exchange mode: ephemeral" \
+            -s "key exchange mode: psk_ephemeral" \
+            -s "found pre_shared_key extension"
+
+requires_gnutls_tls1_3
+requires_config_enabled MBEDTLS_SSL_SESSION_TICKETS
+requires_config_enabled MBEDTLS_SSL_SRV_C
+requires_config_enabled MBEDTLS_DEBUG_C
+requires_all_configs_enabled MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE \
+                             MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED \
+                             MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
+# Test the session resumption when the cipher suite for the original session is
+# TLS1-3-AES-256-GCM-SHA384. In that case, the PSK is 384 bits long and not
+# 256 bits long as with all the other TLS 1.3 cipher suites.
+requires_ciphersuite_enabled TLS1-3-AES-256-GCM-SHA384
+run_test    "TLS 1.3: NewSessionTicket: Basic check with AES-256-GCM only, G->m" \
+            "$P_SRV debug_level=4 crt_file=data_files/server5.crt key_file=data_files/server5.key force_version=tls13 tickets=4" \
+            "$G_NEXT_CLI localhost -d 4 --priority=NORMAL:-VERS-ALL:+VERS-TLS1.3:-CIPHER-ALL:+AES-256-GCM -V -r" \
+            0 \
+            -c "Connecting again- trying to resume previous session" \
+            -c "NEW SESSION TICKET (4) was received" \
+            -s "Ciphersuite is TLS1-3-AES-256-GCM-SHA384" \
             -s "=> write NewSessionTicket msg" \
             -s "server state: MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET" \
             -s "server state: MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET_FLUSH" \
