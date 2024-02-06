@@ -2,19 +2,7 @@
  *  Privacy Enhanced Mail (PEM) decoding
  *
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
 #include "common.h"
@@ -29,7 +17,6 @@
 #include "mbedtls/cipher.h"
 #include "mbedtls/platform_util.h"
 #include "mbedtls/error.h"
-#include "hash_info.h"
 
 #include <string.h>
 
@@ -311,7 +298,7 @@ int mbedtls_pem_read_buffer(mbedtls_pem_context *ctx, const char *header, const 
     if (*end == '\n') {
         end++;
     }
-    *use_len = end - data;
+    *use_len = (size_t) (end - data);
 
     enc = 0;
 
@@ -396,7 +383,7 @@ int mbedtls_pem_read_buffer(mbedtls_pem_context *ctx, const char *header, const 
         return MBEDTLS_ERR_PEM_INVALID_DATA;
     }
 
-    ret = mbedtls_base64_decode(NULL, 0, &len, s1, s2 - s1);
+    ret = mbedtls_base64_decode(NULL, 0, &len, s1, (size_t) (s2 - s1));
 
     if (ret == MBEDTLS_ERR_BASE64_INVALID_CHARACTER) {
         return MBEDTLS_ERROR_ADD(MBEDTLS_ERR_PEM_INVALID_DATA, ret);
@@ -406,17 +393,15 @@ int mbedtls_pem_read_buffer(mbedtls_pem_context *ctx, const char *header, const 
         return MBEDTLS_ERR_PEM_ALLOC_FAILED;
     }
 
-    if ((ret = mbedtls_base64_decode(buf, len, &len, s1, s2 - s1)) != 0) {
-        mbedtls_platform_zeroize(buf, len);
-        mbedtls_free(buf);
+    if ((ret = mbedtls_base64_decode(buf, len, &len, s1, (size_t) (s2 - s1))) != 0) {
+        mbedtls_zeroize_and_free(buf, len);
         return MBEDTLS_ERROR_ADD(MBEDTLS_ERR_PEM_INVALID_DATA, ret);
     }
 
     if (enc != 0) {
 #if defined(PEM_RFC1421)
         if (pwd == NULL) {
-            mbedtls_platform_zeroize(buf, len);
-            mbedtls_free(buf);
+            mbedtls_zeroize_and_free(buf, len);
             return MBEDTLS_ERR_PEM_PASSWORD_REQUIRED;
         }
 
@@ -452,13 +437,11 @@ int mbedtls_pem_read_buffer(mbedtls_pem_context *ctx, const char *header, const 
          * Use that as a heuristic to try to detect password mismatches.
          */
         if (len <= 2 || buf[0] != 0x30 || buf[1] > 0x83) {
-            mbedtls_platform_zeroize(buf, len);
-            mbedtls_free(buf);
+            mbedtls_zeroize_and_free(buf, len);
             return MBEDTLS_ERR_PEM_PASSWORD_MISMATCH;
         }
 #else
-        mbedtls_platform_zeroize(buf, len);
-        mbedtls_free(buf);
+        mbedtls_zeroize_and_free(buf, len);
         return MBEDTLS_ERR_PEM_FEATURE_UNAVAILABLE;
 #endif /* PEM_RFC1421 */
     }
@@ -472,8 +455,7 @@ int mbedtls_pem_read_buffer(mbedtls_pem_context *ctx, const char *header, const 
 void mbedtls_pem_free(mbedtls_pem_context *ctx)
 {
     if (ctx->buf != NULL) {
-        mbedtls_platform_zeroize(ctx->buf, ctx->buflen);
-        mbedtls_free(ctx->buf);
+        mbedtls_zeroize_and_free(ctx->buf, ctx->buflen);
     }
     mbedtls_free(ctx->info);
 
@@ -491,7 +473,7 @@ int mbedtls_pem_write_buffer(const char *header, const char *footer,
     size_t len = 0, use_len, add_len = 0;
 
     mbedtls_base64_encode(NULL, 0, &use_len, der_data, der_len);
-    add_len = strlen(header) + strlen(footer) + (use_len / 64) + 1;
+    add_len = strlen(header) + strlen(footer) + (((use_len > 2) ? (use_len - 2) : 0) / 64) + 1;
 
     if (use_len + add_len > buf_len) {
         *olen = use_len + add_len;
@@ -526,7 +508,7 @@ int mbedtls_pem_write_buffer(const char *header, const char *footer,
     p += strlen(footer);
 
     *p++ = '\0';
-    *olen = p - buf;
+    *olen = (size_t) (p - buf);
 
     /* Clean any remaining data previously written to the buffer */
     memset(buf + *olen, 0, buf_len - *olen);

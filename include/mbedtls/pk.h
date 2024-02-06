@@ -5,19 +5,7 @@
  */
 /*
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
 #ifndef MBEDTLS_PK_H
@@ -171,36 +159,34 @@ typedef struct mbedtls_pk_rsassa_pss_options {
 #endif
 #endif /* defined(MBEDTLS_USE_PSA_CRYPTO) */
 
-/**
- * \brief   The following defines are meant to list ECDSA capabilities of the
- *          PK module in a general way (without any reference to how this
- *          is achieved, which can be either through PSA driver or
- *          MBEDTLS_ECDSA_C)
+/* Internal helper to define which fields in the pk_context structure below
+ * should be used for EC keys: legacy ecp_keypair or the raw (PSA friendly)
+ * format. It should be noted that this only affects how data is stored, not
+ * which functions are used for various operations. The overall picture looks
+ * like this:
+ * - if USE_PSA is not defined and ECP_C is defined then use ecp_keypair data
+ *   structure and legacy functions
+ * - if USE_PSA is defined and
+ *     - if ECP_C then use ecp_keypair structure, convert data to a PSA friendly
+ *       format and use PSA functions
+ *     - if !ECP_C then use new raw data and PSA functions directly.
+ *
+ * The main reason for the "intermediate" (USE_PSA + ECP_C) above is that as long
+ * as ECP_C is defined mbedtls_pk_ec() gives the user a read/write access to the
+ * ecp_keypair structure inside the pk_context so they can modify it using
+ * ECP functions which are not under PK module's control.
  */
-#if !defined(MBEDTLS_USE_PSA_CRYPTO)
-#if defined(MBEDTLS_ECDSA_C)
-#define MBEDTLS_PK_CAN_ECDSA_SIGN
-#define MBEDTLS_PK_CAN_ECDSA_VERIFY
-#endif
-#else /* MBEDTLS_USE_PSA_CRYPTO */
-#if defined(PSA_WANT_ALG_ECDSA)
-#if defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR)
-#define MBEDTLS_PK_CAN_ECDSA_SIGN
-#endif
-#if defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY)
-#define MBEDTLS_PK_CAN_ECDSA_VERIFY
-#endif
-#endif /* PSA_WANT_ALG_ECDSA */
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
-
-#if defined(MBEDTLS_PK_CAN_ECDSA_VERIFY) || defined(MBEDTLS_PK_CAN_ECDSA_SIGN)
-#define MBEDTLS_PK_CAN_ECDSA_SOME
+#if defined(MBEDTLS_USE_PSA_CRYPTO) && defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY) && \
+    !defined(MBEDTLS_ECP_C)
+#define MBEDTLS_PK_USE_PSA_EC_DATA
 #endif
 
-#if (defined(MBEDTLS_USE_PSA_CRYPTO) && defined(PSA_WANT_ALG_ECDH)) || \
-    (!defined(MBEDTLS_USE_PSA_CRYPTO) && defined(MBEDTLS_ECDH_C))
-#define MBEDTLS_PK_CAN_ECDH
-#endif
+/* Helper symbol to state that the PK module has support for EC keys. This
+ * can either be provided through the legacy ECP solution or through the
+ * PSA friendly MBEDTLS_PK_USE_PSA_EC_DATA. */
+#if defined(MBEDTLS_PK_USE_PSA_EC_DATA) || defined(MBEDTLS_ECP_C)
+#define MBEDTLS_PK_HAVE_ECC_KEYS
+#endif /* MBEDTLS_PK_USE_PSA_EC_DATA || MBEDTLS_ECP_C */
 
 /**
  * \brief           Types for interfacing with the debug module
@@ -209,6 +195,7 @@ typedef enum {
     MBEDTLS_PK_DEBUG_NONE = 0,
     MBEDTLS_PK_DEBUG_MPI,
     MBEDTLS_PK_DEBUG_ECP,
+    MBEDTLS_PK_DEBUG_PSA_EC,
 } mbedtls_pk_debug_type;
 
 /**
@@ -232,12 +219,54 @@ typedef struct mbedtls_pk_debug_item {
  */
 typedef struct mbedtls_pk_info_t mbedtls_pk_info_t;
 
+#define MBEDTLS_PK_MAX_EC_PUBKEY_RAW_LEN \
+    PSA_KEY_EXPORT_ECC_PUBLIC_KEY_MAX_SIZE(PSA_VENDOR_ECC_MAX_CURVE_BITS)
 /**
  * \brief           Public key container
  */
 typedef struct mbedtls_pk_context {
     const mbedtls_pk_info_t *MBEDTLS_PRIVATE(pk_info);    /**< Public key information         */
     void *MBEDTLS_PRIVATE(pk_ctx);                        /**< Underlying public key context  */
+    /* The following field is used to store the ID of a private key in the
+     * following cases:
+     * - opaque key when MBEDTLS_USE_PSA_CRYPTO is defined
+     * - normal key when MBEDTLS_PK_USE_PSA_EC_DATA is defined. In this case:
+     *    - the pk_ctx above is not not used to store the private key anymore.
+     *      Actually that field not populated at all in this case because also
+     *      the public key will be stored in raw format as explained below
+     *    - this ID is used for all private key operations (ex: sign, check
+     *      key pair, key write, etc) using PSA functions
+     *
+     * Note: this private key storing solution only affects EC keys, not the
+     *       other ones. The latters still use the pk_ctx to store their own
+     *       context. */
+#if defined(MBEDTLS_USE_PSA_CRYPTO)
+    mbedtls_svc_key_id_t MBEDTLS_PRIVATE(priv_id);      /**< Key ID for opaque keys */
+#endif /* MBEDTLS_USE_PSA_CRYPTO */
+    /* The following fields are meant for storing the public key in raw format
+     * which is handy for:
+     * - easily importing it into the PSA context
+     * - reducing the ECP module dependencies in the PK one.
+     *
+     * When MBEDTLS_PK_USE_PSA_EC_DATA is enabled:
+     * - the pk_ctx above is not used anymore for storing the public key
+     *   inside the ecp_keypair structure
+     * - the following fields are used for all public key operations: signature
+     *   verify, key pair check and key write.
+     * Of course, when MBEDTLS_PK_USE_PSA_EC_DATA is not enabled, the legacy
+     * ecp_keypair structure is used for storing the public key and performing
+     * all the operations.
+     *
+     * Note: This new public key storing solution only works for EC keys, not
+     *       other ones. The latters still use pk_ctx to store their own
+     *       context.
+     */
+#if defined(MBEDTLS_PK_USE_PSA_EC_DATA)
+    uint8_t MBEDTLS_PRIVATE(pub_raw)[MBEDTLS_PK_MAX_EC_PUBKEY_RAW_LEN]; /**< Raw public key   */
+    size_t MBEDTLS_PRIVATE(pub_raw_len);            /**< Valid bytes in "pub_raw" */
+    psa_ecc_family_t MBEDTLS_PRIVATE(ec_family);    /**< EC family of pk */
+    size_t MBEDTLS_PRIVATE(ec_bits);                /**< Curve's bits of pk */
+#endif /* MBEDTLS_PK_USE_PSA_EC_DATA */
 } mbedtls_pk_context;
 
 #if defined(MBEDTLS_ECDSA_C) && defined(MBEDTLS_ECP_RESTARTABLE)
@@ -475,7 +504,7 @@ int mbedtls_pk_can_do_ext(const mbedtls_pk_context *ctx, psa_algorithm_t alg,
  *
  * \return          0 on success (signature is valid),
  *                  #MBEDTLS_ERR_PK_SIG_LEN_MISMATCH if there is a valid
- *                  signature in sig but its length is less than \p siglen,
+ *                  signature in \p sig but its length is less than \p sig_len,
  *                  or a specific error code.
  *
  * \note            For RSA keys, the default padding type is PKCS#1 v1.5.
@@ -529,7 +558,7 @@ int mbedtls_pk_verify_restartable(mbedtls_pk_context *ctx,
  *                  #MBEDTLS_ERR_PK_TYPE_MISMATCH if the PK context can't be
  *                  used for this type of signatures,
  *                  #MBEDTLS_ERR_PK_SIG_LEN_MISMATCH if there is a valid
- *                  signature in sig but its length is less than \p siglen,
+ *                  signature in \p sig but its length is less than \p sig_len,
  *                  or a specific error code.
  *
  * \note            If hash_len is 0, then the length associated with md_alg
@@ -581,7 +610,6 @@ int mbedtls_pk_sign(mbedtls_pk_context *ctx, mbedtls_md_type_t md_alg,
                     unsigned char *sig, size_t sig_size, size_t *sig_len,
                     int (*f_rng)(void *, unsigned char *, size_t), void *p_rng);
 
-#if defined(MBEDTLS_PSA_CRYPTO_C)
 /**
  * \brief           Make signature given a signature type.
  *
@@ -618,7 +646,6 @@ int mbedtls_pk_sign_ext(mbedtls_pk_type_t pk_type,
                         unsigned char *sig, size_t sig_size, size_t *sig_len,
                         int (*f_rng)(void *, unsigned char *, size_t),
                         void *p_rng);
-#endif /* MBEDTLS_PSA_CRYPTO_C */
 
 /**
  * \brief           Restartable version of \c mbedtls_pk_sign()
@@ -1014,14 +1041,6 @@ int mbedtls_pk_parse_subpubkey(unsigned char **p, const unsigned char *end,
 int mbedtls_pk_write_pubkey(unsigned char **p, unsigned char *start,
                             const mbedtls_pk_context *key);
 #endif /* MBEDTLS_PK_WRITE_C */
-
-/*
- * Internal module functions. You probably do not want to use these unless you
- * know you do.
- */
-#if defined(MBEDTLS_FS_IO)
-int mbedtls_pk_load_file(const char *path, unsigned char **buf, size_t *n);
-#endif
 
 #if defined(MBEDTLS_USE_PSA_CRYPTO)
 /**

@@ -2,19 +2,7 @@
  *  NIST SP800-38D compliant GCM implementation
  *
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
 /*
@@ -35,6 +23,11 @@
 #include "mbedtls/platform.h"
 #include "mbedtls/platform_util.h"
 #include "mbedtls/error.h"
+#include "mbedtls/constant_time.h"
+
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+#include "block_cipher_internal.h"
+#endif
 
 #include <string.h>
 
@@ -70,10 +63,16 @@ static int gcm_gen_table(mbedtls_gcm_context *ctx)
     uint64_t hi, lo;
     uint64_t vl, vh;
     unsigned char h[16];
-    size_t olen = 0;
 
     memset(h, 0, 16);
-    if ((ret = mbedtls_cipher_update(&ctx->cipher_ctx, h, 16, h, &olen)) != 0) {
+
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+    ret = mbedtls_block_cipher_encrypt(&ctx->block_cipher_ctx, h, h);
+#else
+    size_t olen = 0;
+    ret = mbedtls_cipher_update(&ctx->cipher_ctx, h, 16, h, &olen);
+#endif
+    if (ret != 0) {
         return ret;
     }
 
@@ -97,8 +96,8 @@ static int gcm_gen_table(mbedtls_gcm_context *ctx)
     }
 #endif
 
-#if defined(MBEDTLS_AESCE_C) && defined(MBEDTLS_HAVE_ARM64)
-    if (mbedtls_aesce_has_support()) {
+#if defined(MBEDTLS_AESCE_HAVE_CODE)
+    if (MBEDTLS_AESCE_HAS_SUPPORT()) {
         return 0;
     }
 #endif
@@ -135,11 +134,23 @@ int mbedtls_gcm_setkey(mbedtls_gcm_context *ctx,
                        unsigned int keybits)
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
-    const mbedtls_cipher_info_t *cipher_info;
 
     if (keybits != 128 && keybits != 192 && keybits != 256) {
         return MBEDTLS_ERR_GCM_BAD_INPUT;
     }
+
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+    mbedtls_block_cipher_free(&ctx->block_cipher_ctx);
+
+    if ((ret = mbedtls_block_cipher_setup(&ctx->block_cipher_ctx, cipher)) != 0) {
+        return ret;
+    }
+
+    if ((ret = mbedtls_block_cipher_setkey(&ctx->block_cipher_ctx, key, keybits)) != 0) {
+        return ret;
+    }
+#else
+    const mbedtls_cipher_info_t *cipher_info;
 
     cipher_info = mbedtls_cipher_info_from_values(cipher, keybits,
                                                   MBEDTLS_MODE_ECB);
@@ -147,7 +158,7 @@ int mbedtls_gcm_setkey(mbedtls_gcm_context *ctx,
         return MBEDTLS_ERR_GCM_BAD_INPUT;
     }
 
-    if (cipher_info->block_size != 16) {
+    if (mbedtls_cipher_info_get_block_size(cipher_info) != 16) {
         return MBEDTLS_ERR_GCM_BAD_INPUT;
     }
 
@@ -161,6 +172,7 @@ int mbedtls_gcm_setkey(mbedtls_gcm_context *ctx,
                                      MBEDTLS_ENCRYPT)) != 0) {
         return ret;
     }
+#endif
 
     if ((ret = gcm_gen_table(ctx)) != 0) {
         return ret;
@@ -174,7 +186,7 @@ int mbedtls_gcm_setkey(mbedtls_gcm_context *ctx,
  *      last4[x] = x times P^128
  * where x and last4[x] are seen as elements of GF(2^128) as in [MGV]
  */
-static const uint64_t last4[16] =
+static const uint16_t last4[16] =
 {
     0x0000, 0x1c20, 0x3840, 0x2460,
     0x7080, 0x6ca0, 0x48c0, 0x54e0,
@@ -208,8 +220,8 @@ static void gcm_mult(mbedtls_gcm_context *ctx, const unsigned char x[16],
     }
 #endif /* MBEDTLS_AESNI_HAVE_CODE */
 
-#if defined(MBEDTLS_AESCE_C) && defined(MBEDTLS_HAVE_ARM64)
-    if (mbedtls_aesce_has_support()) {
+#if defined(MBEDTLS_AESCE_HAVE_CODE)
+    if (MBEDTLS_AESCE_HAS_SUPPORT()) {
         unsigned char h[16];
 
         /* mbedtls_aesce_gcm_mult needs big-endian input */
@@ -263,8 +275,11 @@ int mbedtls_gcm_starts(mbedtls_gcm_context *ctx,
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
     unsigned char work_buf[16];
     const unsigned char *p;
-    size_t use_len, olen = 0;
+    size_t use_len;
     uint64_t iv_bits;
+#if !defined(MBEDTLS_BLOCK_CIPHER_C)
+    size_t olen = 0;
+#endif
 
     /* IV is limited to 2^64 bits, so 2^61 bytes */
     /* IV is not allowed to be zero length */
@@ -304,8 +319,13 @@ int mbedtls_gcm_starts(mbedtls_gcm_context *ctx,
         gcm_mult(ctx, ctx->y, ctx->y);
     }
 
-    if ((ret = mbedtls_cipher_update(&ctx->cipher_ctx, ctx->y, 16,
-                                     ctx->base_ectr, &olen)) != 0) {
+
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+    ret = mbedtls_block_cipher_encrypt(&ctx->block_cipher_ctx, ctx->y, ctx->base_ectr);
+#else
+    ret = mbedtls_cipher_update(&ctx->cipher_ctx, ctx->y, 16, ctx->base_ectr, &olen);
+#endif
+    if (ret != 0) {
         return ret;
     }
 
@@ -334,9 +354,17 @@ int mbedtls_gcm_update_ad(mbedtls_gcm_context *ctx,
 {
     const unsigned char *p;
     size_t use_len, offset;
+    uint64_t new_add_len;
 
-    /* IV is limited to 2^64 bits, so 2^61 bytes */
-    if ((uint64_t) add_len >> 61 != 0) {
+    /* AD is limited to 2^64 bits, ie 2^61 bytes
+     * Also check for possible overflow */
+#if SIZE_MAX > 0xFFFFFFFFFFFFFFFFULL
+    if (add_len > 0xFFFFFFFFFFFFFFFFULL) {
+        return MBEDTLS_ERR_GCM_BAD_INPUT;
+    }
+#endif
+    new_add_len = ctx->add_len + (uint64_t) add_len;
+    if (new_add_len < ctx->add_len || new_add_len >> 61 != 0) {
         return MBEDTLS_ERR_GCM_BAD_INPUT;
     }
 
@@ -381,12 +409,9 @@ int mbedtls_gcm_update_ad(mbedtls_gcm_context *ctx,
 /* Increment the counter. */
 static void gcm_incr(unsigned char y[16])
 {
-    size_t i;
-    for (i = 16; i > 12; i--) {
-        if (++y[i - 1] != 0) {
-            break;
-        }
-    }
+    uint32_t x = MBEDTLS_GET_UINT32_BE(y, 12);
+    x++;
+    MBEDTLS_PUT_UINT32_BE(x, y, 12);
 }
 
 /* Calculate and apply the encryption mask. Process use_len bytes of data,
@@ -397,11 +422,15 @@ static int gcm_mask(mbedtls_gcm_context *ctx,
                     const unsigned char *input,
                     unsigned char *output)
 {
-    size_t olen = 0;
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
 
-    if ((ret = mbedtls_cipher_update(&ctx->cipher_ctx, ctx->y, 16, ectr,
-                                     &olen)) != 0) {
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+    ret = mbedtls_block_cipher_encrypt(&ctx->block_cipher_ctx, ctx->y, ectr);
+#else
+    size_t olen = 0;
+    ret = mbedtls_cipher_update(&ctx->cipher_ctx, ctx->y, 16, ectr, &olen);
+#endif
+    if (ret != 0) {
         mbedtls_platform_zeroize(ectr, 16);
         return ret;
     }
@@ -518,6 +547,9 @@ int mbedtls_gcm_finish(mbedtls_gcm_context *ctx,
     (void) output_size;
     *output_length = 0;
 
+    /* Total length is restricted to 2^39 - 256 bits, ie 2^36 - 2^5 bytes
+     * and AD length is restricted to 2^64 bits, ie 2^61 bytes so neither of
+     * the two multiplications would overflow. */
     orig_len = ctx->len * 8;
     orig_add_len = ctx->add_len * 8;
 
@@ -601,7 +633,6 @@ int mbedtls_gcm_auth_decrypt(mbedtls_gcm_context *ctx,
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
     unsigned char check_tag[16];
-    size_t i;
     int diff;
 
     if ((ret = mbedtls_gcm_crypt_and_tag(ctx, MBEDTLS_GCM_DECRYPT, length,
@@ -611,9 +642,7 @@ int mbedtls_gcm_auth_decrypt(mbedtls_gcm_context *ctx,
     }
 
     /* Check tag in "constant-time" */
-    for (diff = 0, i = 0; i < tag_len; i++) {
-        diff |= tag[i] ^ check_tag[i];
-    }
+    diff = mbedtls_ct_memcmp(tag, check_tag, tag_len);
 
     if (diff != 0) {
         mbedtls_platform_zeroize(output, length);
@@ -628,13 +657,17 @@ void mbedtls_gcm_free(mbedtls_gcm_context *ctx)
     if (ctx == NULL) {
         return;
     }
+#if defined(MBEDTLS_BLOCK_CIPHER_C)
+    mbedtls_block_cipher_free(&ctx->block_cipher_ctx);
+#else
     mbedtls_cipher_free(&ctx->cipher_ctx);
+#endif
     mbedtls_platform_zeroize(ctx, sizeof(mbedtls_gcm_context));
 }
 
 #endif /* !MBEDTLS_GCM_ALT */
 
-#if defined(MBEDTLS_SELF_TEST) && defined(MBEDTLS_AES_C)
+#if defined(MBEDTLS_SELF_TEST) && defined(MBEDTLS_CCM_GCM_CAN_AES)
 /*
  * AES-GCM test vectors from:
  *
@@ -645,7 +678,7 @@ void mbedtls_gcm_free(mbedtls_gcm_context *ctx)
 static const int key_index_test_data[MAX_TESTS] =
 { 0, 0, 1, 1, 1, 1 };
 
-static const unsigned char key_test_data[MAX_TESTS][32] =
+static const unsigned char key_test_data[][32] =
 {
     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -663,7 +696,7 @@ static const size_t iv_len_test_data[MAX_TESTS] =
 static const int iv_index_test_data[MAX_TESTS] =
 { 0, 0, 1, 1, 1, 2 };
 
-static const unsigned char iv_test_data[MAX_TESTS][64] =
+static const unsigned char iv_test_data[][64] =
 {
     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00 },
@@ -685,7 +718,7 @@ static const size_t add_len_test_data[MAX_TESTS] =
 static const int add_index_test_data[MAX_TESTS] =
 { 0, 0, 0, 1, 1, 1 };
 
-static const unsigned char additional_test_data[MAX_TESTS][64] =
+static const unsigned char additional_test_data[][64] =
 {
     { 0x00 },
     { 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef,
@@ -699,7 +732,7 @@ static const size_t pt_len_test_data[MAX_TESTS] =
 static const int pt_index_test_data[MAX_TESTS] =
 { 0, 0, 1, 1, 1, 1 };
 
-static const unsigned char pt_test_data[MAX_TESTS][64] =
+static const unsigned char pt_test_data[][64] =
 {
     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
@@ -713,7 +746,7 @@ static const unsigned char pt_test_data[MAX_TESTS][64] =
       0xba, 0x63, 0x7b, 0x39, 0x1a, 0xaf, 0xd2, 0x55 },
 };
 
-static const unsigned char ct_test_data[MAX_TESTS * 3][64] =
+static const unsigned char ct_test_data[][64] =
 {
     { 0x00 },
     { 0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92,
@@ -750,6 +783,7 @@ static const unsigned char ct_test_data[MAX_TESTS * 3][64] =
       0xcc, 0xdc, 0xb2, 0x81, 0xd4, 0x8c, 0x7c, 0x6f,
       0xd6, 0x28, 0x75, 0xd2, 0xac, 0xa4, 0x17, 0x03,
       0x4c, 0x34, 0xae, 0xe5 },
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
     { 0x00 },
     { 0x98, 0xe7, 0x24, 0x7c, 0x07, 0xf0, 0xfe, 0x41,
       0x1c, 0x26, 0x7e, 0x43, 0x84, 0xb0, 0xf6, 0x00 },
@@ -820,9 +854,10 @@ static const unsigned char ct_test_data[MAX_TESTS * 3][64] =
       0x2d, 0xa3, 0xeb, 0xf1, 0xc5, 0xd8, 0x2c, 0xde,
       0xa2, 0x41, 0x89, 0x97, 0x20, 0x0e, 0xf8, 0x2e,
       0x44, 0xae, 0x7e, 0x3f },
+#endif /* !MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH */
 };
 
-static const unsigned char tag_test_data[MAX_TESTS * 3][16] =
+static const unsigned char tag_test_data[][16] =
 {
     { 0x58, 0xe2, 0xfc, 0xce, 0xfa, 0x7e, 0x30, 0x61,
       0x36, 0x7f, 0x1d, 0x57, 0xa4, 0xe7, 0x45, 0x5a },
@@ -836,6 +871,7 @@ static const unsigned char tag_test_data[MAX_TESTS * 3][16] =
       0x56, 0x1b, 0xe1, 0x4a, 0xac, 0xa2, 0xfc, 0xcb },
     { 0x61, 0x9c, 0xc5, 0xae, 0xff, 0xfe, 0x0b, 0xfa,
       0x46, 0x2a, 0xf4, 0x3c, 0x16, 0x99, 0xd0, 0x50 },
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
     { 0xcd, 0x33, 0xb2, 0x8a, 0xc7, 0x73, 0xf7, 0x4b,
       0xa0, 0x0e, 0xd1, 0xf3, 0x12, 0x57, 0x24, 0x35 },
     { 0x2f, 0xf5, 0x8d, 0x80, 0x03, 0x39, 0x27, 0xab,
@@ -860,6 +896,7 @@ static const unsigned char tag_test_data[MAX_TESTS * 3][16] =
       0x5e, 0x45, 0x49, 0x13, 0xfe, 0x2e, 0xa8, 0xf2 },
     { 0xa4, 0x4a, 0x82, 0x66, 0xee, 0x1c, 0x8e, 0xb0,
       0xc8, 0xb5, 0xd4, 0xcf, 0x5a, 0xe9, 0xf1, 0x9a },
+#endif /* !MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH */
 };
 
 int mbedtls_gcm_self_test(int verbose)
@@ -880,20 +917,30 @@ int mbedtls_gcm_self_test(int verbose)
             mbedtls_printf("  GCM note: using AESNI.\n");
         } else
 #endif
+
+#if defined(MBEDTLS_AESCE_HAVE_CODE)
+        if (MBEDTLS_AESCE_HAS_SUPPORT()) {
+            mbedtls_printf("  GCM note: using AESCE.\n");
+        } else
+#endif
+
         mbedtls_printf("  GCM note: built-in implementation.\n");
 #endif /* MBEDTLS_GCM_ALT */
     }
 
-    for (j = 0; j < 3; j++) {
+    static const int loop_limit =
+        (sizeof(ct_test_data) / sizeof(*ct_test_data)) / MAX_TESTS;
+
+    for (j = 0; j < loop_limit; j++) {
         int key_len = 128 + 64 * j;
 
         for (i = 0; i < MAX_TESTS; i++) {
-            mbedtls_gcm_init(&ctx);
-
             if (verbose != 0) {
                 mbedtls_printf("  AES-GCM-%3d #%d (%s): ",
                                key_len, i, "enc");
             }
+
+            mbedtls_gcm_init(&ctx);
 
             ret = mbedtls_gcm_setkey(&ctx, cipher,
                                      key_test_data[key_index_test_data[i]],

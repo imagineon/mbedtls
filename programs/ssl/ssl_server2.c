@@ -2,19 +2,7 @@
  *  SSL client with options
  *
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
@@ -70,10 +58,11 @@ int main(void)
 #endif
 
 #include "mbedtls/pk.h"
+#include "mbedtls/dhm.h"
 
 /* Size of memory to be allocated for the heap, when using the library's memory
  * management and MBEDTLS_MEMORY_BUFFER_ALLOC_C is enabled. */
-#define MEMORY_HEAP_SIZE        120000
+#define MEMORY_HEAP_SIZE        180000
 
 #define DFL_SERVER_ADDR         NULL
 #define DFL_SERVER_PORT         "4433"
@@ -132,7 +121,7 @@ int main(void)
 #define DFL_CACHE_REMOVE        0
 #define DFL_SNI                 NULL
 #define DFL_ALPN_STRING         NULL
-#define DFL_CURVES              NULL
+#define DFL_GROUPS              NULL
 #define DFL_MAX_EARLY_DATA_SIZE 0
 #define DFL_SIG_ALGS            NULL
 #define DFL_DHM_FILE            NULL
@@ -172,7 +161,7 @@ int main(void)
  * packets (for fragmentation purposes) */
 #define HTTP_RESPONSE \
     "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n" \
-    "<h2>mbed TLS Test Server</h2>\r\n" \
+    "<h2>Mbed TLS Test Server</h2>\r\n" \
     "<p>Successful connection using: %s</p>\r\n" // LONG_RESPONSE
 
 /*
@@ -282,6 +271,7 @@ int main(void)
 #else
 #define USAGE_PSK ""
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_PSK_ENABLED */
+
 #if defined(MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK)
 #define USAGE_CA_CALLBACK                       \
     "   ca_callback=%%d       default: 0 (disabled)\n"      \
@@ -289,13 +279,14 @@ int main(void)
 #else
 #define USAGE_CA_CALLBACK ""
 #endif /* MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK */
+
 #if defined(MBEDTLS_SSL_SESSION_TICKETS) && defined(MBEDTLS_SSL_TICKET_C)
 #define USAGE_TICKETS                                       \
     "    tickets=%%d          default: 1 (enabled)\n"       \
     "    ticket_rotate=%%d    default: 0 (disabled)\n"      \
     "    ticket_timeout=%%d   default: 86400 (one day)\n"   \
     "    ticket_aead=%%s      default: \"AES-256-GCM\"\n"
-#else
+#else /* MBEDTLS_SSL_SESSION_TICKETS && MBEDTLS_SSL_TICKET_C */
 #define USAGE_TICKETS ""
 #endif /* MBEDTLS_SSL_SESSION_TICKETS && MBEDTLS_SSL_TICKET_C */
 
@@ -445,15 +436,20 @@ int main(void)
 #define USAGE_EARLY_DATA ""
 #endif /* MBEDTLS_SSL_EARLY_DATA */
 
-#if defined(MBEDTLS_ECP_C)
-#define USAGE_CURVES \
-    "    curves=a,b,c,d      default: \"default\" (library default)\n"  \
+#if defined(MBEDTLS_PK_HAVE_ECC_KEYS) || \
+    (defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_SOME_EPHEMERAL_ENABLED) && \
+    defined(PSA_WANT_ALG_FFDH))
+#define USAGE_GROUPS \
+    "    groups=a,b,c,d      default: \"default\" (library default)\n"  \
     "                        example: \"secp521r1,brainpoolP512r1\"\n"  \
     "                        - use \"none\" for empty list\n"           \
-    "                        - see mbedtls_ecp_curve_list()\n"          \
-    "                          for acceptable curve names\n"
+    "                        - see mbedtls_ecp_curve_list()\n"                \
+    "                          for acceptable EC group names\n"               \
+    "                        - the following ffdh groups are supported:\n"    \
+    "                          ffdhe2048, ffdhe3072, ffdhe4096, ffdhe6144,\n" \
+    "                          ffdhe8192\n"
 #else
-#define USAGE_CURVES ""
+#define USAGE_GROUPS ""
 #endif
 
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
@@ -557,9 +553,10 @@ int main(void)
     USAGE_ALPN                                              \
     USAGE_EMS                                               \
     USAGE_ETM                                               \
-    USAGE_CURVES                                            \
+    USAGE_GROUPS                                            \
     USAGE_SIG_ALGS                                          \
     USAGE_KEY_OPAQUE_ALGS                                   \
+    USAGE_EARLY_DATA                                        \
     "\n"
 
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
@@ -584,11 +581,7 @@ int main(void)
     "                                otherwise. The expansion of the macro\n" \
     "                                is printed if it is defined\n"           \
     USAGE_SERIALIZATION                                                       \
-    " acceptable ciphersuite names:\n"
-
-#define ALPN_LIST_SIZE    10
-#define CURVE_LIST_SIZE   20
-#define SIG_ALG_LIST_SIZE 5
+    "\n"
 
 #define PUT_UINT64_BE(out_be, in_le, i)                                   \
     {                                                                       \
@@ -671,9 +664,9 @@ struct options {
 #if defined(MBEDTLS_HAVE_TIME)
     int cache_timeout;          /* expiration delay of session cache entries*/
 #endif
-    int cache_remove;           /* enable / disable cache removement        */
+    int cache_remove;           /* enable / disable cache entry removal     */
     char *sni;                  /* string describing sni information        */
-    const char *curves;         /* list of supported elliptic curves        */
+    const char *groups;         /* list of supported groups                 */
     const char *sig_algs;       /* supported TLS 1.3 signature algorithms   */
     const char *alpn_string;    /* ALPN supported protocols                 */
     const char *dhm_file;       /* the file with the DH parameters          */
@@ -1427,22 +1420,29 @@ int dummy_ticket_parse(void *p_ticket, mbedtls_ssl_session *session,
             return MBEDTLS_ERR_SSL_INVALID_MAC;
         case 2:
             return MBEDTLS_ERR_SSL_SESSION_TICKET_EXPIRED;
+#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
         case 3:
-            session->start = mbedtls_time(NULL) + 10;
+            /* Creation time in the future. */
+            session->ticket_creation_time = mbedtls_ms_time() + 1000;
             break;
         case 4:
-            session->start = mbedtls_time(NULL) - 10 - 7 * 24 * 3600;
+            /* Ticket has reached the end of lifetime. */
+            session->ticket_creation_time = mbedtls_ms_time() -
+                                            (7 * 24 * 3600 * 1000 + 1000);
             break;
         case 5:
-            session->start = mbedtls_time(NULL) - 10;
+            /* Ticket is valid, but client age is below the lower bound of the tolerance window. */
+            session->ticket_age_add += MBEDTLS_SSL_TLS1_3_TICKET_AGE_TOLERANCE + 4 * 1000;
+            /* Make sure the execution time does not affect the result */
+            session->ticket_creation_time = mbedtls_ms_time();
             break;
+
         case 6:
-            session->start = mbedtls_time(NULL);
-#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-            session->ticket_age_add -= 1000;
-#endif
+            /* Ticket is valid, but client age is beyond the upper bound of the tolerance window. */
+            session->ticket_age_add -= MBEDTLS_SSL_TLS1_3_TICKET_AGE_TOLERANCE + 4 * 1000;
+            /* Make sure the execution time does not affect the result */
+            session->ticket_creation_time = mbedtls_ms_time();
             break;
-#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
         case 7:
             session->ticket_flags = MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE;
             break;
@@ -1463,6 +1463,42 @@ int dummy_ticket_parse(void *p_ticket, mbedtls_ssl_session *session,
     return ret;
 }
 #endif /* MBEDTLS_SSL_SESSION_TICKETS && MBEDTLS_HAVE_TIME */
+
+int parse_cipher(char *buf)
+{
+    if (strcmp(buf, "AES-128-CCM")) {
+        return MBEDTLS_CIPHER_AES_128_CCM;
+    } else if (strcmp(buf, "AES-128-GCM")) {
+        return MBEDTLS_CIPHER_AES_128_GCM;
+    } else if (strcmp(buf, "AES-192-CCM")) {
+        return MBEDTLS_CIPHER_AES_192_CCM;
+    } else if (strcmp(buf, "AES-192-GCM")) {
+        return MBEDTLS_CIPHER_AES_192_GCM;
+    } else if (strcmp(buf, "AES-256-CCM")) {
+        return MBEDTLS_CIPHER_AES_256_CCM;
+    } else if (strcmp(buf, "ARIA-128-CCM")) {
+        return MBEDTLS_CIPHER_ARIA_128_CCM;
+    } else if (strcmp(buf, "ARIA-128-GCM")) {
+        return MBEDTLS_CIPHER_ARIA_128_GCM;
+    } else if (strcmp(buf, "ARIA-192-CCM")) {
+        return MBEDTLS_CIPHER_ARIA_192_CCM;
+    } else if (strcmp(buf, "ARIA-192-GCM")) {
+        return MBEDTLS_CIPHER_ARIA_192_GCM;
+    } else if (strcmp(buf, "ARIA-256-CCM")) {
+        return MBEDTLS_CIPHER_ARIA_256_CCM;
+    } else if (strcmp(buf, "ARIA-256-GCM")) {
+        return MBEDTLS_CIPHER_ARIA_256_GCM;
+    } else if (strcmp(buf, "CAMELLIA-128-CCM")) {
+        return MBEDTLS_CIPHER_CAMELLIA_128_CCM;
+    } else if (strcmp(buf, "CAMELLIA-192-CCM")) {
+        return MBEDTLS_CIPHER_CAMELLIA_192_CCM;
+    } else if (strcmp(buf, "CAMELLIA-256-CCM")) {
+        return MBEDTLS_CIPHER_CAMELLIA_256_CCM;
+    } else if (strcmp(buf, "CHACHA20-POLY1305")) {
+        return MBEDTLS_CIPHER_CHACHA20_POLY1305;
+    }
+    return MBEDTLS_CIPHER_NONE;
+}
 
 int main(int argc, char *argv[])
 {
@@ -1523,10 +1559,7 @@ int main(int argc, char *argv[])
 #if defined(SNI_OPTION)
     sni_entry *sni_info = NULL;
 #endif
-#if defined(MBEDTLS_ECP_C)
-    uint16_t group_list[CURVE_LIST_SIZE];
-    const mbedtls_ecp_curve_info *curve_cur;
-#endif
+    uint16_t group_list[GROUP_LIST_SIZE];
 #if defined(MBEDTLS_SSL_ALPN)
     const char *alpn_list[ALPN_LIST_SIZE];
 #endif
@@ -1579,6 +1612,7 @@ int main(int argc, char *argv[])
 #if defined(MBEDTLS_SSL_EARLY_DATA)
     int tls13_early_data_enabled = MBEDTLS_SSL_EARLY_DATA_DISABLED;
 #endif
+
 #if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
     mbedtls_memory_buffer_alloc_init(alloc_buf, sizeof(alloc_buf));
 #if defined(MBEDTLS_MEMORY_DEBUG)
@@ -1642,31 +1676,6 @@ int main(int argc, char *argv[])
     signal(SIGTERM, term_handler);
     signal(SIGINT, term_handler);
 #endif
-
-    if (argc < 2) {
-usage:
-        if (ret == 0) {
-            ret = 1;
-        }
-
-        mbedtls_printf(USAGE1);
-        mbedtls_printf(USAGE2);
-        mbedtls_printf(USAGE3);
-        mbedtls_printf(USAGE4);
-
-        list = mbedtls_ssl_list_ciphersuites();
-        while (*list) {
-            mbedtls_printf(" %-42s", mbedtls_ssl_get_ciphersuite_name(*list));
-            list++;
-            if (!*list) {
-                break;
-            }
-            mbedtls_printf(" %s\n", mbedtls_ssl_get_ciphersuite_name(*list));
-            list++;
-        }
-        mbedtls_printf("\n");
-        goto exit;
-    }
 
     opt.buffer_size         = DFL_IO_BUF_LEN;
     opt.server_addr         = DFL_SERVER_ADDR;
@@ -1737,7 +1746,7 @@ usage:
     opt.cache_remove        = DFL_CACHE_REMOVE;
     opt.sni                 = DFL_SNI;
     opt.alpn_string         = DFL_ALPN_STRING;
-    opt.curves              = DFL_CURVES;
+    opt.groups              = DFL_GROUPS;
     opt.max_early_data_size = DFL_MAX_EARLY_DATA_SIZE;
     opt.sig_algs            = DFL_SIG_ALGS;
     opt.dhm_file            = DFL_DHM_FILE;
@@ -1766,9 +1775,54 @@ usage:
     opt.key2_opaque_alg1   = DFL_KEY_OPAQUE_ALG;
     opt.key2_opaque_alg2   = DFL_KEY_OPAQUE_ALG;
 
+    p = q = NULL;
+    if (argc < 1) {
+usage:
+        if (p != NULL && q != NULL) {
+            printf("unrecognized value for '%s': '%s'\n", p, q);
+        } else if (p != NULL && q == NULL) {
+            printf("unrecognized param: '%s'\n", p);
+        }
+
+        mbedtls_printf("usage: ssl_client2 [param=value] [...]\n");
+        mbedtls_printf("       ssl_client2 help[_theme]\n");
+        mbedtls_printf("'help' lists acceptable 'param' and 'value'\n");
+        mbedtls_printf("'help_ciphersuites' lists available ciphersuites\n");
+        mbedtls_printf("\n");
+
+        if (ret == 0) {
+            ret = 1;
+        }
+        goto exit;
+    }
+
     for (i = 1; i < argc; i++) {
         p = argv[i];
+
+        if (strcmp(p, "help") == 0) {
+            mbedtls_printf(USAGE1);
+            mbedtls_printf(USAGE2);
+            mbedtls_printf(USAGE3);
+            mbedtls_printf(USAGE4);
+
+            ret = 0;
+            goto exit;
+        }
+        if (strcmp(p, "help_ciphersuites") == 0) {
+            mbedtls_printf(" acceptable ciphersuite names:\n");
+            for (list = mbedtls_ssl_list_ciphersuites();
+                 *list != 0;
+                 list++) {
+                mbedtls_printf(" %s\n", mbedtls_ssl_get_ciphersuite_name(*list));
+            }
+
+            ret = 0;
+            goto exit;
+        }
+
         if ((q = strchr(p, '=')) == NULL) {
+            mbedtls_printf("param requires a value: '%s'\n", p);
+            p = NULL; // avoid "unrecnognized param" message
             goto usage;
         }
         *q++ = '\0';
@@ -1917,8 +1971,8 @@ usage:
                 goto usage;
             }
             opt.force_ciphersuite[1] = 0;
-        } else if (strcmp(p, "curves") == 0) {
-            opt.curves = q;
+        } else if (strcmp(p, "groups") == 0) {
+            opt.groups = q;
         }
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
         else if (strcmp(p, "sig_algs") == 0) {
@@ -2128,12 +2182,11 @@ usage:
                 goto usage;
             }
         } else if (strcmp(p, "ticket_aead") == 0) {
-            const mbedtls_cipher_info_t *ci = mbedtls_cipher_info_from_string(q);
+            opt.ticket_aead = parse_cipher(q);
 
-            if (ci == NULL) {
+            if (opt.ticket_aead == MBEDTLS_CIPHER_NONE) {
                 goto usage;
             }
-            opt.ticket_aead = mbedtls_cipher_info_get_type(ci);
         } else if (strcmp(p, "cache_max") == 0) {
             opt.cache_max = atoi(q);
             if (opt.cache_max < 0) {
@@ -2233,9 +2286,13 @@ usage:
                 goto usage;
             }
         } else {
+            /* This signals that the problem is with p not q */
+            q = NULL;
             goto usage;
         }
     }
+    /* This signals that any further erorrs are not with a single option */
+    p = q = NULL;
 
     if (opt.nss_keylog != 0 && opt.eap_tls != 0) {
         mbedtls_printf("Error: eap_tls and nss_keylog options cannot be used together.\n");
@@ -2390,53 +2447,11 @@ usage:
     }
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_PSK_ENABLED */
 
-#if defined(MBEDTLS_ECP_C)
-    if (opt.curves != NULL) {
-        p = (char *) opt.curves;
-        i = 0;
-
-        if (strcmp(p, "none") == 0) {
-            group_list[0] = 0;
-        } else if (strcmp(p, "default") != 0) {
-            /* Leave room for a final NULL in curve list */
-            while (i < CURVE_LIST_SIZE - 1 && *p != '\0') {
-                q = p;
-
-                /* Terminate the current string */
-                while (*p != ',' && *p != '\0') {
-                    p++;
-                }
-                if (*p == ',') {
-                    *p++ = '\0';
-                }
-
-                if ((curve_cur = mbedtls_ecp_curve_info_from_name(q)) != NULL) {
-                    group_list[i++] = curve_cur->tls_id;
-                } else {
-                    mbedtls_printf("unknown curve %s\n", q);
-                    mbedtls_printf("supported curves: ");
-                    for (curve_cur = mbedtls_ecp_curve_list();
-                         curve_cur->grp_id != MBEDTLS_ECP_DP_NONE;
-                         curve_cur++) {
-                        mbedtls_printf("%s ", curve_cur->name);
-                    }
-                    mbedtls_printf("\n");
-                    goto exit;
-                }
-            }
-
-            mbedtls_printf("Number of curves: %d\n", i);
-
-            if (i == CURVE_LIST_SIZE - 1 && *p != '\0') {
-                mbedtls_printf("curves list too long, maximum %d",
-                               CURVE_LIST_SIZE - 1);
-                goto exit;
-            }
-
-            group_list[i] = 0;
+    if (opt.groups != NULL) {
+        if (parse_groups(opt.groups, group_list, GROUP_LIST_SIZE) != 0) {
+            goto exit;
         }
     }
-#endif /* MBEDTLS_ECP_C */
 
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
     if (opt.sig_algs != NULL) {
@@ -2794,9 +2809,9 @@ usage:
     }
 
 #if defined(MBEDTLS_SSL_EARLY_DATA)
-    mbedtls_ssl_tls13_conf_early_data(&conf, tls13_early_data_enabled);
+    mbedtls_ssl_conf_early_data(&conf, tls13_early_data_enabled);
     if (tls13_early_data_enabled == MBEDTLS_SSL_EARLY_DATA_ENABLED) {
-        mbedtls_ssl_tls13_conf_max_early_data_size(
+        mbedtls_ssl_conf_max_early_data_size(
             &conf, opt.max_early_data_size);
     }
 #endif /* MBEDTLS_SSL_EARLY_DATA */
@@ -3138,9 +3153,11 @@ usage:
     }
 #endif
 
-#if defined(MBEDTLS_ECP_C)
-    if (opt.curves != NULL &&
-        strcmp(opt.curves, "default") != 0) {
+#if defined(MBEDTLS_PK_HAVE_ECC_KEYS) || \
+    (defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_SOME_EPHEMERAL_ENABLED) && \
+    defined(PSA_WANT_ALG_FFDH))
+    if (opt.groups != NULL &&
+        strcmp(opt.groups, "default") != 0) {
         mbedtls_ssl_conf_groups(&conf, group_list);
     }
 #endif
@@ -3434,6 +3451,19 @@ handshake:
     fflush(stdout);
 
     while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
+#if defined(MBEDTLS_SSL_EARLY_DATA)
+        if (ret == MBEDTLS_ERR_SSL_RECEIVED_EARLY_DATA) {
+            memset(buf, 0, opt.buffer_size);
+            ret = mbedtls_ssl_read_early_data(&ssl, buf, opt.buffer_size);
+            if (ret > 0) {
+                buf[ret] = '\0';
+                mbedtls_printf(" %d early data bytes read\n\n%s\n",
+                               ret, (char *) buf);
+            }
+            continue;
+        }
+#endif /* MBEDTLS_SSL_EARLY_DATA */
+
 #if defined(MBEDTLS_SSL_ASYNC_PRIVATE)
         if (ret == MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS &&
             ssl_async_keys.inject_error == SSL_ASYNC_INJECT_ERROR_CANCEL) {
@@ -3505,7 +3535,7 @@ handshake:
         mbedtls_printf("    [ Record expansion is unknown ]\n");
     }
 
-#if defined(MBEDTLS_SSL_MAX_FRAGMENT_LENGTH)
+#if defined(MBEDTLS_SSL_MAX_FRAGMENT_LENGTH) || defined(MBEDTLS_SSL_RECORD_SIZE_LIMIT)
     mbedtls_printf("    [ Maximum incoming record payload length is %u ]\n",
                    (unsigned int) mbedtls_ssl_get_max_in_record_payload(&ssl));
     mbedtls_printf("    [ Maximum outgoing record payload length is %u ]\n",
@@ -3822,7 +3852,6 @@ data_exchange:
             switch (ret) {
                 case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
                     mbedtls_printf(" connection was closed gracefully\n");
-                    ret = 0;
                     goto close_notify;
 
                 default:

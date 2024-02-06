@@ -35,27 +35,15 @@
  * GCC and Clang initialize the whole structure to 0 (at the time of writing),
  * but MSVC and CompCert don't.
  *
- * In Mbed Crypto, multipart operation structures live independently from
- * the key. This allows Mbed Crypto to free the key objects when destroying
+ * In Mbed TLS, multipart operation structures live independently from
+ * the key. This allows Mbed TLS to free the key objects when destroying
  * a key slot. If a multipart operation needs to remember the key after
  * the setup function returns, the operation structure needs to contain a
  * copy of the key.
  */
 /*
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0
- *
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may
- *  not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
 #ifndef PSA_CRYPTO_STRUCT_H
@@ -66,14 +54,14 @@
 extern "C" {
 #endif
 
-/* Include the Mbed TLS configuration file, the way Mbed TLS does it
- * in each of its header files. */
-#include "mbedtls/build_info.h"
-
-#include "mbedtls/cmac.h"
-#include "mbedtls/gcm.h"
-#include "mbedtls/ccm.h"
-#include "mbedtls/chachapoly.h"
+/*
+ * Include the build-time configuration information header. Here, we do not
+ * include `"mbedtls/build_info.h"` directly but `"psa/build_info.h"`, which
+ * is basically just an alias to it. This is to ease the maintenance of the
+ * TF-PSA-Crypto repository which has a different build system and
+ * configuration.
+ */
+#include "psa/build_info.h"
 
 /* Include the context definition for the compiled-in drivers for the primitive
  * algorithms. */
@@ -177,96 +165,15 @@ static inline struct psa_aead_operation_s psa_aead_operation_init(void)
     return v;
 }
 
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF) || \
-    defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXTRACT) || \
-    defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXPAND)
-typedef struct {
-    uint8_t *MBEDTLS_PRIVATE(info);
-    size_t MBEDTLS_PRIVATE(info_length);
-#if PSA_HASH_MAX_SIZE > 0xff
-#error "PSA_HASH_MAX_SIZE does not fit in uint8_t"
-#endif
-    uint8_t MBEDTLS_PRIVATE(offset_in_block);
-    uint8_t MBEDTLS_PRIVATE(block_number);
-    unsigned int MBEDTLS_PRIVATE(state) : 2;
-    unsigned int MBEDTLS_PRIVATE(info_set) : 1;
-    uint8_t MBEDTLS_PRIVATE(output_block)[PSA_HASH_MAX_SIZE];
-    uint8_t MBEDTLS_PRIVATE(prk)[PSA_HASH_MAX_SIZE];
-    struct psa_mac_operation_s MBEDTLS_PRIVATE(hmac);
-} psa_hkdf_key_derivation_t;
-#endif /* MBEDTLS_PSA_BUILTIN_ALG_HKDF ||
-          MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXTRACT ||
-          MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXPAND */
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_ECJPAKE_TO_PMS)
-typedef struct {
-    uint8_t MBEDTLS_PRIVATE(data)[PSA_TLS12_ECJPAKE_TO_PMS_DATA_SIZE];
-} psa_tls12_ecjpake_to_pms_t;
-#endif /* MBEDTLS_PSA_BUILTIN_ALG_TLS12_ECJPAKE_TO_PMS */
-
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PRF) || \
-    defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS)
-typedef enum {
-    PSA_TLS12_PRF_STATE_INIT,             /* no input provided */
-    PSA_TLS12_PRF_STATE_SEED_SET,         /* seed has been set */
-    PSA_TLS12_PRF_STATE_OTHER_KEY_SET,    /* other key has been set - optional */
-    PSA_TLS12_PRF_STATE_KEY_SET,          /* key has been set */
-    PSA_TLS12_PRF_STATE_LABEL_SET,        /* label has been set */
-    PSA_TLS12_PRF_STATE_OUTPUT            /* output has been started */
-} psa_tls12_prf_key_derivation_state_t;
-
-typedef struct psa_tls12_prf_key_derivation_s {
-#if PSA_HASH_MAX_SIZE > 0xff
-#error "PSA_HASH_MAX_SIZE does not fit in uint8_t"
-#endif
-
-    /* Indicates how many bytes in the current HMAC block have
-     * not yet been read by the user. */
-    uint8_t MBEDTLS_PRIVATE(left_in_block);
-
-    /* The 1-based number of the block. */
-    uint8_t MBEDTLS_PRIVATE(block_number);
-
-    psa_tls12_prf_key_derivation_state_t MBEDTLS_PRIVATE(state);
-
-    uint8_t *MBEDTLS_PRIVATE(secret);
-    size_t MBEDTLS_PRIVATE(secret_length);
-    uint8_t *MBEDTLS_PRIVATE(seed);
-    size_t MBEDTLS_PRIVATE(seed_length);
-    uint8_t *MBEDTLS_PRIVATE(label);
-    size_t MBEDTLS_PRIVATE(label_length);
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS)
-    uint8_t *MBEDTLS_PRIVATE(other_secret);
-    size_t MBEDTLS_PRIVATE(other_secret_length);
-#endif /* MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS */
-
-    uint8_t MBEDTLS_PRIVATE(Ai)[PSA_HASH_MAX_SIZE];
-
-    /* `HMAC_hash( prk, A( i ) + seed )` in the notation of RFC 5246, Sect. 5. */
-    uint8_t MBEDTLS_PRIVATE(output_block)[PSA_HASH_MAX_SIZE];
-} psa_tls12_prf_key_derivation_t;
-#endif /* MBEDTLS_PSA_BUILTIN_ALG_TLS12_PRF) ||
-        * MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS */
+/* Include the context definition for the compiled-in drivers for the key
+ * derivation algorithms. */
+#include "psa/crypto_driver_contexts_key_derivation.h"
 
 struct psa_key_derivation_s {
     psa_algorithm_t MBEDTLS_PRIVATE(alg);
     unsigned int MBEDTLS_PRIVATE(can_output_key) : 1;
     size_t MBEDTLS_PRIVATE(capacity);
-    union {
-        /* Make the union non-empty even with no supported algorithms. */
-        uint8_t MBEDTLS_PRIVATE(dummy);
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF) || \
-        defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXTRACT) || \
-        defined(MBEDTLS_PSA_BUILTIN_ALG_HKDF_EXPAND)
-        psa_hkdf_key_derivation_t MBEDTLS_PRIVATE(hkdf);
-#endif
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PRF) || \
-        defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS)
-        psa_tls12_prf_key_derivation_t MBEDTLS_PRIVATE(tls12_prf);
-#endif
-#if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_ECJPAKE_TO_PMS)
-        psa_tls12_ecjpake_to_pms_t MBEDTLS_PRIVATE(tls12_ecjpake_to_pms);
-#endif
-    } MBEDTLS_PRIVATE(ctx);
+    psa_driver_key_derivation_context_t MBEDTLS_PRIVATE(ctx);
 };
 
 /* This only zeroes out the first byte in the union, the rest is unspecified. */
@@ -347,6 +254,18 @@ struct psa_key_attributes_s {
 #if defined(MBEDTLS_PSA_CRYPTO_SE_C)
     psa_key_slot_number_t MBEDTLS_PRIVATE(slot_number);
 #endif /* MBEDTLS_PSA_CRYPTO_SE_C */
+    /* Unlike normal buffers, there are three cases for domain_parameters
+     * and domain_parameters_size:
+     * - domain_parameters_size == SIZE_MAX && domain_parameters == NULL:
+     *   Access to domain parameters is not supported for this key.
+     *   This is a hack which should not exist, intended for keys managed
+     *   by a driver, because drivers don't support domain parameters.
+     * - domain_parameters_size == 0 && domain_parameters == NULL:
+     *   The domain parameters are empty.
+     * - domain_parameters_size > 0 &&
+     *   domain_parameters == valid pointer to domain_parameters_size bytes:
+     *   The domain parameters are non-empty.
+     */
     void *MBEDTLS_PRIVATE(domain_parameters);
     size_t MBEDTLS_PRIVATE(domain_parameters_size);
 };
@@ -449,10 +368,13 @@ static inline psa_algorithm_t psa_get_key_algorithm(
 
 /* This function is declared in crypto_extra.h, which comes after this
  * header file, but we need the function here, so repeat the declaration. */
+#if !defined(PSA_SET_KEY_DOMAIN_PARAMETERS)
+#define PSA_SET_KEY_DOMAIN_PARAMETERS
 psa_status_t psa_set_key_domain_parameters(psa_key_attributes_t *attributes,
                                            psa_key_type_t type,
                                            const uint8_t *data,
                                            size_t data_length);
+#endif /* PSA_SET_KEY_DOMAIN_PARAMETERS */
 
 static inline void psa_set_key_type(psa_key_attributes_t *attributes,
                                     psa_key_type_t type)
