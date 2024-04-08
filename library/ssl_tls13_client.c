@@ -666,6 +666,7 @@ static int ssl_tls13_write_psk_key_exchange_modes_ext(mbedtls_ssl_context *ssl,
     return 0;
 }
 
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
 static psa_algorithm_t ssl_tls13_get_ciphersuite_hash_alg(int ciphersuite)
 {
     const mbedtls_ssl_ciphersuite_t *ciphersuite_info = NULL;
@@ -678,7 +679,6 @@ static psa_algorithm_t ssl_tls13_get_ciphersuite_hash_alg(int ciphersuite)
     return PSA_ALG_NONE;
 }
 
-#if defined(MBEDTLS_SSL_SESSION_TICKETS)
 static int ssl_tls13_has_configured_ticket(mbedtls_ssl_context *ssl)
 {
     mbedtls_ssl_session *session = ssl->session_negotiate;
@@ -1180,26 +1180,29 @@ int mbedtls_ssl_tls13_write_client_hello_exts(mbedtls_ssl_context *ssl,
 #endif
 
 #if defined(MBEDTLS_SSL_EARLY_DATA)
-    if (mbedtls_ssl_conf_tls13_is_some_psk_enabled(ssl) &&
-        ssl_tls13_early_data_has_valid_ticket(ssl) &&
-        ssl->conf->early_data_enabled == MBEDTLS_SSL_EARLY_DATA_ENABLED &&
-        ssl->handshake->hello_retry_request_count == 0) {
+    /* In the first ClientHello, write the early data indication extension if
+     * necessary and update the early data state.
+     * If an HRR has been received and thus we are currently writing the
+     * second ClientHello, the second ClientHello must not contain an early
+     * data extension and the early data state must stay as it is:
+     * MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT or
+     * MBEDTLS_SSL_EARLY_DATA_STATE_REJECTED.
+     */
+    if (!ssl->handshake->hello_retry_request_flag) {
+        if (mbedtls_ssl_conf_tls13_is_some_psk_enabled(ssl) &&
+            ssl_tls13_early_data_has_valid_ticket(ssl) &&
+            ssl->conf->early_data_enabled == MBEDTLS_SSL_EARLY_DATA_ENABLED) {
+            ret = mbedtls_ssl_tls13_write_early_data_ext(
+                ssl, 0, p, end, &ext_len);
+            if (ret != 0) {
+                return ret;
+            }
+            p += ext_len;
 
-        ret = mbedtls_ssl_tls13_write_early_data_ext(
-            ssl, 0, p, end, &ext_len);
-        if (ret != 0) {
-            return ret;
+            ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_IND_SENT;
+        } else {
+            ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT;
         }
-        p += ext_len;
-
-        /* Initializes the status to `rejected`. It will be updated to
-         * `accepted` if the EncryptedExtension message contain an early data
-         * indication extension.
-         */
-        ssl->early_data_status = MBEDTLS_SSL_EARLY_DATA_STATUS_REJECTED;
-    } else {
-        MBEDTLS_SSL_DEBUG_MSG(2, ("<= skip write early_data extension"));
-        ssl->early_data_status = MBEDTLS_SSL_EARLY_DATA_STATUS_NOT_SENT;
     }
 #endif /* MBEDTLS_SSL_EARLY_DATA */
 
@@ -1236,7 +1239,7 @@ int mbedtls_ssl_tls13_finalize_client_hello(mbedtls_ssl_context *ssl)
     size_t psk_len;
     const mbedtls_ssl_ciphersuite_t *ciphersuite_info;
 
-    if (ssl->early_data_status == MBEDTLS_SSL_EARLY_DATA_STATUS_REJECTED) {
+    if (ssl->early_data_state == MBEDTLS_SSL_EARLY_DATA_STATE_IND_SENT) {
         MBEDTLS_SSL_DEBUG_MSG(
             1, ("Set hs psk for early data when writing the first psk"));
 
@@ -1299,6 +1302,7 @@ int mbedtls_ssl_tls13_finalize_client_hello(mbedtls_ssl_context *ssl)
             1, ("Switch to early data keys for outbound traffic"));
         mbedtls_ssl_set_outbound_transform(
             ssl, ssl->handshake->transform_earlydata);
+        ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_CAN_WRITE;
 #endif
     }
 #endif /* MBEDTLS_SSL_EARLY_DATA */
@@ -1482,10 +1486,8 @@ static int ssl_tls13_preprocess_server_hello(mbedtls_ssl_context *ssl,
         return SSL_SERVER_HELLO_TLS1_2;
     }
 
-#if defined(MBEDTLS_SSL_SESSION_TICKETS)
-    ssl->session_negotiate->endpoint = ssl->conf->endpoint;
     ssl->session_negotiate->tls_version = ssl->tls_version;
-#endif /* MBEDTLS_SSL_SESSION_TICKETS */
+    ssl->session_negotiate->endpoint = ssl->conf->endpoint;
 
     handshake->received_extensions = MBEDTLS_SSL_EXT_MASK_NONE;
 
@@ -1501,7 +1503,7 @@ static int ssl_tls13_preprocess_server_hello(mbedtls_ssl_context *ssl,
              * to a HelloRetryRequest), it MUST abort the handshake with an
              * "unexpected_message" alert.
              */
-            if (handshake->hello_retry_request_count > 0) {
+            if (handshake->hello_retry_request_flag) {
                 MBEDTLS_SSL_DEBUG_MSG(1, ("Multiple HRRs received"));
                 MBEDTLS_SSL_PEND_FATAL_ALERT(
                     MBEDTLS_SSL_ALERT_MSG_UNEXPECTED_MESSAGE,
@@ -1523,7 +1525,7 @@ static int ssl_tls13_preprocess_server_hello(mbedtls_ssl_context *ssl,
                 return MBEDTLS_ERR_SSL_ILLEGAL_PARAMETER;
             }
 
-            handshake->hello_retry_request_count++;
+            handshake->hello_retry_request_flag = 1;
 
             break;
     }
@@ -1678,7 +1680,7 @@ static int ssl_tls13_parse_server_hello(mbedtls_ssl_context *ssl,
      * proposed in the HRR, we abort the handshake and send an
      * "illegal_parameter" alert.
      */
-    else if ((!is_hrr) && (handshake->hello_retry_request_count > 0) &&
+    else if ((!is_hrr) && handshake->hello_retry_request_flag &&
              (cipher_suite != ssl->session_negotiate->ciphersuite)) {
         fatal_alert = MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER;
     }
@@ -1917,7 +1919,7 @@ static int ssl_tls13_postprocess_server_hello(mbedtls_ssl_context *ssl)
      * cases we compute it here.
      */
 #if defined(MBEDTLS_SSL_EARLY_DATA)
-    if (ssl->early_data_status == MBEDTLS_SSL_EARLY_DATA_STATUS_NOT_SENT ||
+    if (ssl->early_data_state == MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT ||
         handshake->key_exchange_mode ==
         MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL)
 #endif
@@ -1971,6 +1973,13 @@ static int ssl_tls13_postprocess_hrr(mbedtls_ssl_context *ssl)
     }
 
     ssl->session_negotiate->ciphersuite = ssl->handshake->ciphersuite_info->id;
+
+#if defined(MBEDTLS_SSL_EARLY_DATA)
+    if (ssl->early_data_state != MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT) {
+        ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_REJECTED;
+    }
+#endif
+
     return 0;
 }
 
@@ -2229,7 +2238,10 @@ static int ssl_tls13_process_encrypted_extensions(mbedtls_ssl_context *ssl)
             return MBEDTLS_ERR_SSL_ILLEGAL_PARAMETER;
         }
 
-        ssl->early_data_status = MBEDTLS_SSL_EARLY_DATA_STATUS_ACCEPTED;
+        ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_ACCEPTED;
+    } else if (ssl->early_data_state !=
+               MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT) {
+        ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_REJECTED;
     }
 #endif
 
@@ -2267,6 +2279,7 @@ cleanup:
 
 }
 
+#if defined(MBEDTLS_SSL_EARLY_DATA)
 /*
  * Handler for MBEDTLS_SSL_END_OF_EARLY_DATA
  *
@@ -2304,6 +2317,32 @@ cleanup:
     MBEDTLS_SSL_DEBUG_MSG(2, ("<= write EndOfEarlyData"));
     return ret;
 }
+
+int mbedtls_ssl_get_early_data_status(mbedtls_ssl_context *ssl)
+{
+    if ((ssl->conf->endpoint != MBEDTLS_SSL_IS_CLIENT) ||
+        (!mbedtls_ssl_is_handshake_over(ssl))) {
+        return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    }
+
+    switch (ssl->early_data_state) {
+        case MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT:
+            return MBEDTLS_SSL_EARLY_DATA_STATUS_NOT_INDICATED;
+            break;
+
+        case MBEDTLS_SSL_EARLY_DATA_STATE_REJECTED:
+            return MBEDTLS_SSL_EARLY_DATA_STATUS_REJECTED;
+            break;
+
+        case MBEDTLS_SSL_EARLY_DATA_STATE_SERVER_FINISHED_RECEIVED:
+            return MBEDTLS_SSL_EARLY_DATA_STATUS_ACCEPTED;
+            break;
+
+        default:
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+}
+#endif /* MBEDTLS_SSL_EARLY_DATA */
 
 #if defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED)
 /*
@@ -2566,10 +2605,9 @@ static int ssl_tls13_process_server_finished(mbedtls_ssl_context *ssl)
     }
 
 #if defined(MBEDTLS_SSL_EARLY_DATA)
-    if (ssl->early_data_status == MBEDTLS_SSL_EARLY_DATA_STATUS_ACCEPTED) {
+    if (ssl->early_data_state == MBEDTLS_SSL_EARLY_DATA_STATE_ACCEPTED) {
+        ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_SERVER_FINISHED_RECEIVED;
         mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_END_OF_EARLY_DATA);
-    } else if (ssl->early_data_status == MBEDTLS_SSL_EARLY_DATA_STATUS_REJECTED) {
-        mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_CLIENT_CERTIFICATE);
     } else
 #endif /* MBEDTLS_SSL_EARLY_DATA */
     {
@@ -2879,12 +2917,17 @@ static int ssl_tls13_parse_new_session_ticket(mbedtls_ssl_context *ssl,
         return ret;
     }
 
-    /* session has been updated, allow export */
-    session->exported = 0;
-
     return 0;
 }
 
+/* Non negative return values for ssl_tls13_postprocess_new_session_ticket().
+ * - POSTPROCESS_NEW_SESSION_TICKET_SIGNAL, all good, we have to signal the
+ *   application that a valid ticket has been received.
+ * - POSTPROCESS_NEW_SESSION_TICKET_DISCARD, no fatal error, we keep the
+ *   connection alive but we do not signal the ticket to the application.
+ */
+#define POSTPROCESS_NEW_SESSION_TICKET_SIGNAL 0
+#define POSTPROCESS_NEW_SESSION_TICKET_DISCARD 1
 MBEDTLS_CHECK_RETURN_CRITICAL
 static int ssl_tls13_postprocess_new_session_ticket(mbedtls_ssl_context *ssl,
                                                     unsigned char *ticket_nonce,
@@ -2895,6 +2938,10 @@ static int ssl_tls13_postprocess_new_session_ticket(mbedtls_ssl_context *ssl,
     const mbedtls_ssl_ciphersuite_t *ciphersuite_info;
     psa_algorithm_t psa_hash_alg;
     int hash_length;
+
+    if (session->ticket_lifetime == 0) {
+        return POSTPROCESS_NEW_SESSION_TICKET_DISCARD;
+    }
 
 #if defined(MBEDTLS_HAVE_TIME)
     /* Store ticket creation time */
@@ -2952,7 +2999,7 @@ static int ssl_tls13_postprocess_new_session_ticket(mbedtls_ssl_context *ssl,
         session, ssl->conf->tls13_kex_modes);
     MBEDTLS_SSL_PRINT_TICKET_FLAGS(4, session->ticket_flags);
 
-    return 0;
+    return POSTPROCESS_NEW_SESSION_TICKET_SIGNAL;
 }
 
 /*
@@ -2973,12 +3020,37 @@ static int ssl_tls13_process_new_session_ticket(mbedtls_ssl_context *ssl)
                              ssl, MBEDTLS_SSL_HS_NEW_SESSION_TICKET,
                              &buf, &buf_len));
 
+    /*
+     * We are about to update (maybe only partially) ticket data thus block
+     * any session export for the time being.
+     */
+    ssl->session->exported = 1;
+
     MBEDTLS_SSL_PROC_CHK(ssl_tls13_parse_new_session_ticket(
                              ssl, buf, buf + buf_len,
                              &ticket_nonce, &ticket_nonce_len));
 
-    MBEDTLS_SSL_PROC_CHK(ssl_tls13_postprocess_new_session_ticket(
-                             ssl, ticket_nonce, ticket_nonce_len));
+    MBEDTLS_SSL_PROC_CHK_NEG(ssl_tls13_postprocess_new_session_ticket(
+                                 ssl, ticket_nonce, ticket_nonce_len));
+
+    switch (ret) {
+        case POSTPROCESS_NEW_SESSION_TICKET_SIGNAL:
+            /*
+             * All good, we have received a new valid ticket, session data can
+             * be exported now and we signal the ticket to the application.
+             */
+            ssl->session->exported = 0;
+            ret = MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET;
+            break;
+
+        case POSTPROCESS_NEW_SESSION_TICKET_DISCARD:
+            ret = 0;
+            MBEDTLS_SSL_DEBUG_MSG(2, ("Discard new session ticket"));
+            break;
+
+        default:
+            ret = MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
 
     mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_HANDSHAKE_OVER);
 
@@ -3028,9 +3100,11 @@ int mbedtls_ssl_tls13_handshake_client_step(mbedtls_ssl_context *ssl)
             ret = ssl_tls13_process_server_finished(ssl);
             break;
 
+#if defined(MBEDTLS_SSL_EARLY_DATA)
         case MBEDTLS_SSL_END_OF_EARLY_DATA:
             ret = ssl_tls13_write_end_of_early_data(ssl);
             break;
+#endif
 
         case MBEDTLS_SSL_CLIENT_CERTIFICATE:
             ret = ssl_tls13_write_client_certificate(ssl);
@@ -3060,17 +3134,18 @@ int mbedtls_ssl_tls13_handshake_client_step(mbedtls_ssl_context *ssl)
 #if defined(MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE)
         case MBEDTLS_SSL_CLIENT_CCS_BEFORE_2ND_CLIENT_HELLO:
             ret = mbedtls_ssl_tls13_write_change_cipher_spec(ssl);
-            if (ret == 0) {
-                mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_CLIENT_HELLO);
+            if (ret != 0) {
+                break;
             }
+            mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_CLIENT_HELLO);
             break;
 
         case MBEDTLS_SSL_CLIENT_CCS_AFTER_SERVER_FINISHED:
             ret = mbedtls_ssl_tls13_write_change_cipher_spec(ssl);
-            if (ret == 0) {
-                mbedtls_ssl_handshake_set_state(
-                    ssl, MBEDTLS_SSL_CLIENT_CERTIFICATE);
+            if (ret != 0) {
+                break;
             }
+            mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_CLIENT_CERTIFICATE);
             break;
 
 #if defined(MBEDTLS_SSL_EARLY_DATA)
@@ -3083,6 +3158,7 @@ int mbedtls_ssl_tls13_handshake_client_step(mbedtls_ssl_context *ssl)
                     1, ("Switch to early data keys for outbound traffic"));
                 mbedtls_ssl_set_outbound_transform(
                     ssl, ssl->handshake->transform_earlydata);
+                ssl->early_data_state = MBEDTLS_SSL_EARLY_DATA_STATE_CAN_WRITE;
             }
             break;
 #endif /* MBEDTLS_SSL_EARLY_DATA */
@@ -3091,10 +3167,6 @@ int mbedtls_ssl_tls13_handshake_client_step(mbedtls_ssl_context *ssl)
 #if defined(MBEDTLS_SSL_SESSION_TICKETS)
         case MBEDTLS_SSL_TLS1_3_NEW_SESSION_TICKET:
             ret = ssl_tls13_process_new_session_ticket(ssl);
-            if (ret != 0) {
-                break;
-            }
-            ret = MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET;
             break;
 #endif /* MBEDTLS_SSL_SESSION_TICKETS */
 

@@ -142,5 +142,10 @@ if in_mbedtls_repo; then
     # generate_visualc_files enumerates source files (library/*.c). It doesn't
     # care about their content, but the files must exist. So it must run after
     # the step that creates or updates these files.
-    check scripts/generate_visualc_files.pl visualc/VS2013
+    check scripts/generate_visualc_files.pl visualc/VS2017
 fi
+
+# Generated files that are present in the repository even in the development
+# branch. (This is intended to be temporary, until the generator scripts are
+# fully reviewed and the build scripts support a generated header file.)
+check tests/scripts/generate_psa_wrappers.py tests/include/test/psa_test_wrappers.h tests/src/psa_test_wrappers.c

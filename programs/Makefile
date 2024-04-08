@@ -7,6 +7,9 @@ else
 DLOPEN_LDFLAGS ?=
 endif
 
+ifdef RECORD_PSA_STATUS_COVERAGE_LOG
+LOCAL_CFLAGS += -Werror -DRECORD_PSA_STATUS_COVERAGE_LOG
+endif
 DEP=${MBEDLIBS} ${MBEDTLS_TEST_OBJS}
 
 # Only build the dlopen test in shared library builds, and not when building
@@ -114,7 +117,7 @@ all: fuzz
 endif
 
 fuzz: ${MBEDTLS_TEST_OBJS}
-	$(MAKE) -C fuzz THIRDPARTY_INCLUDES=$(THIRDPARTY_INCLUDES)
+	$(MAKE) -C fuzz
 
 ${MBEDTLS_TEST_OBJS}:
 	$(MAKE) -C ../tests mbedtls_test

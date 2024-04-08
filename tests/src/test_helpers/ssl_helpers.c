@@ -12,9 +12,7 @@
 #include "mbedtls/psa_util.h"
 
 #if defined(MBEDTLS_SSL_TLS_C)
-#if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
-static int rng_seed = 0xBEEF;
-static int rng_get(void *p_rng, unsigned char *output, size_t output_len)
+int mbedtls_test_random(void *p_rng, unsigned char *output, size_t output_len)
 {
     (void) p_rng;
     for (size_t i = 0; i < output_len; i++) {
@@ -23,7 +21,6 @@ static int rng_get(void *p_rng, unsigned char *output, size_t output_len)
 
     return 0;
 }
-#endif
 
 void mbedtls_test_ssl_log_analyzer(void *ctx, int level,
                                    const char *file, int line,
@@ -46,39 +43,32 @@ void mbedtls_test_init_handshake_options(
     mbedtls_test_handshake_test_options *opts)
 {
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
+    static int rng_seed = 0xBEEF;
+
     srand(rng_seed);
     rng_seed += 0xD0;
 #endif
+
+    memset(opts, 0, sizeof(*opts));
+
     opts->cipher = "";
     opts->client_min_version = MBEDTLS_SSL_VERSION_UNKNOWN;
     opts->client_max_version = MBEDTLS_SSL_VERSION_UNKNOWN;
     opts->server_min_version = MBEDTLS_SSL_VERSION_UNKNOWN;
     opts->server_max_version = MBEDTLS_SSL_VERSION_UNKNOWN;
     opts->expected_negotiated_version = MBEDTLS_SSL_VERSION_TLS1_3;
-    opts->expected_handshake_result = 0;
-    opts->expected_ciphersuite = 0;
     opts->pk_alg = MBEDTLS_PK_RSA;
-    opts->opaque_alg = 0;
-    opts->opaque_alg2 = 0;
-    opts->opaque_usage = 0;
-    opts->psk_str = NULL;
-    opts->dtls = 0;
     opts->srv_auth_mode = MBEDTLS_SSL_VERIFY_NONE;
-    opts->serialize = 0;
     opts->mfl = MBEDTLS_SSL_MAX_FRAG_LEN_NONE;
     opts->cli_msg_len = 100;
     opts->srv_msg_len = 100;
     opts->expected_cli_fragments = 1;
     opts->expected_srv_fragments = 1;
-    opts->renegotiate = 0;
     opts->legacy_renegotiation = MBEDTLS_SSL_LEGACY_NO_RENEGOTIATION;
-    opts->srv_log_obj = NULL;
-    opts->cli_log_obj = NULL;
-    opts->srv_log_fun = NULL;
-    opts->cli_log_fun = NULL;
     opts->resize_buffers = 1;
+    opts->early_data = MBEDTLS_SSL_EARLY_DATA_DISABLED;
+    opts->max_early_data_size = -1;
 #if defined(MBEDTLS_SSL_CACHE_C)
-    opts->cache = NULL;
     TEST_CALLOC(opts->cache, 1);
     mbedtls_ssl_cache_init(opts->cache);
 #if defined(MBEDTLS_HAVE_TIME)
@@ -695,9 +685,20 @@ int mbedtls_test_ssl_endpoint_certificate_init(mbedtls_test_ssl_endpoint *ep,
 
 #if defined(MBEDTLS_USE_PSA_CRYPTO)
     if (opaque_alg != 0) {
-        TEST_EQUAL(mbedtls_pk_wrap_as_opaque(cert->pkey, &key_slot,
-                                             opaque_alg, opaque_usage,
-                                             opaque_alg2), 0);
+        psa_key_attributes_t key_attr = PSA_KEY_ATTRIBUTES_INIT;
+        /* Use a fake key usage to get a successful initial guess for the PSA attributes. */
+        TEST_EQUAL(mbedtls_pk_get_psa_attributes(cert->pkey, PSA_KEY_USAGE_SIGN_HASH,
+                                                 &key_attr), 0);
+        /* Then manually usage, alg and alg2 as requested by the test. */
+        psa_set_key_usage_flags(&key_attr, opaque_usage);
+        psa_set_key_algorithm(&key_attr, opaque_alg);
+        if (opaque_alg2 != PSA_ALG_NONE) {
+            psa_set_key_enrollment_algorithm(&key_attr, opaque_alg2);
+        }
+        TEST_EQUAL(mbedtls_pk_import_into_psa(cert->pkey, &key_attr, &key_slot), 0);
+        mbedtls_pk_free(cert->pkey);
+        mbedtls_pk_init(cert->pkey);
+        TEST_EQUAL(mbedtls_pk_setup_opaque(cert->pkey, key_slot), 0);
     }
 #else
     (void) opaque_alg;
@@ -733,8 +734,7 @@ int mbedtls_test_ssl_endpoint_init(
     mbedtls_test_handshake_test_options *options,
     mbedtls_test_message_socket_context *dtls_context,
     mbedtls_test_ssl_message_queue *input_queue,
-    mbedtls_test_ssl_message_queue *output_queue,
-    uint16_t *group_list)
+    mbedtls_test_ssl_message_queue *output_queue)
 {
     int ret = -1;
     uintptr_t user_data_n;
@@ -755,7 +755,7 @@ int mbedtls_test_ssl_endpoint_init(
 
     mbedtls_ssl_init(&(ep->ssl));
     mbedtls_ssl_config_init(&(ep->conf));
-    mbedtls_ssl_conf_rng(&(ep->conf), rng_get, NULL);
+    mbedtls_ssl_conf_rng(&(ep->conf), mbedtls_test_random, NULL);
 
     TEST_ASSERT(mbedtls_ssl_conf_get_user_data_p(&ep->conf) == NULL);
     TEST_EQUAL(mbedtls_ssl_conf_get_user_data_n(&ep->conf), 0);
@@ -818,11 +818,28 @@ int mbedtls_test_ssl_endpoint_init(
         }
     }
 
-    if (group_list != NULL) {
-        mbedtls_ssl_conf_groups(&(ep->conf), group_list);
+    if (options->group_list != NULL) {
+        mbedtls_ssl_conf_groups(&(ep->conf), options->group_list);
     }
 
     mbedtls_ssl_conf_authmode(&(ep->conf), MBEDTLS_SSL_VERIFY_REQUIRED);
+
+#if defined(MBEDTLS_SSL_EARLY_DATA)
+    mbedtls_ssl_conf_early_data(&(ep->conf), options->early_data);
+#if defined(MBEDTLS_SSL_SRV_C)
+    if (endpoint_type == MBEDTLS_SSL_IS_SERVER &&
+        (options->max_early_data_size >= 0)) {
+        mbedtls_ssl_conf_max_early_data_size(&(ep->conf),
+                                             options->max_early_data_size);
+    }
+#endif
+#if defined(MBEDTLS_SSL_ALPN)
+    /* check that alpn_list contains at least one valid entry */
+    if (options->alpn_list[0] != NULL) {
+        mbedtls_ssl_conf_alpn_protocols(&(ep->conf), options->alpn_list);
+    }
+#endif
+#endif
 
 #if defined(MBEDTLS_SSL_CACHE_C) && defined(MBEDTLS_SSL_SRV_C)
     if (endpoint_type == MBEDTLS_SSL_IS_SERVER && options->cache != NULL) {
@@ -1653,12 +1670,20 @@ exit:
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2)
 int mbedtls_test_ssl_tls12_populate_session(mbedtls_ssl_session *session,
                                             int ticket_len,
+                                            int endpoint_type,
                                             const char *crt_file)
 {
+    (void) ticket_len;
+
 #if defined(MBEDTLS_HAVE_TIME)
     session->start = mbedtls_time(NULL) - 42;
 #endif
     session->tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
+
+    TEST_ASSERT(endpoint_type == MBEDTLS_SSL_IS_CLIENT ||
+                endpoint_type == MBEDTLS_SSL_IS_SERVER);
+
+    session->endpoint = endpoint_type;
     session->ciphersuite = 0xabcd;
     session->id_len = sizeof(session->id);
     memset(session->id, 66, session->id_len);
@@ -1724,7 +1749,8 @@ int mbedtls_test_ssl_tls12_populate_session(mbedtls_ssl_session *session,
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED && MBEDTLS_FS_IO */
     session->verify_result = 0xdeadbeef;
 
-#if defined(MBEDTLS_SSL_SESSION_TICKETS) && defined(MBEDTLS_SSL_CLI_C)
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+#if defined(MBEDTLS_SSL_CLI_C)
     if (ticket_len != 0) {
         session->ticket = mbedtls_calloc(1, ticket_len);
         if (session->ticket == NULL) {
@@ -1734,9 +1760,14 @@ int mbedtls_test_ssl_tls12_populate_session(mbedtls_ssl_session *session,
     }
     session->ticket_len = ticket_len;
     session->ticket_lifetime = 86401;
-#else
-    (void) ticket_len;
+#endif /* MBEDTLS_SSL_CLI_C */
+
+#if defined(MBEDTLS_SSL_SRV_C) && defined(MBEDTLS_HAVE_TIME)
+    if (session->endpoint == MBEDTLS_SSL_IS_SERVER) {
+        session->ticket_creation_time = mbedtls_ms_time() - 42;
+    }
 #endif
+#endif /* MBEDTLS_SSL_SESSION_TICKETS */
 
 #if defined(MBEDTLS_SSL_MAX_FRAGMENT_LENGTH)
     session->mfl_code = 1;
@@ -1745,6 +1776,7 @@ int mbedtls_test_ssl_tls12_populate_session(mbedtls_ssl_session *session,
     session->encrypt_then_mac = 1;
 #endif
 
+exit:
     return 0;
 }
 #endif /* MBEDTLS_SSL_PROTO_TLS1_2 */
@@ -1759,24 +1791,33 @@ int mbedtls_test_ssl_tls13_populate_session(mbedtls_ssl_session *session,
     session->endpoint = endpoint_type == MBEDTLS_SSL_IS_CLIENT ?
                         MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
     session->ciphersuite = 0xabcd;
+
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
     session->ticket_age_add = 0x87654321;
     session->ticket_flags = 0x7;
-
     session->resumption_key_len = 32;
     memset(session->resumption_key, 0x99, sizeof(session->resumption_key));
-
-#if defined(MBEDTLS_SSL_EARLY_DATA)
-    session->max_early_data_size = 0x87654321;
 #endif
 
-#if defined(MBEDTLS_HAVE_TIME) && defined(MBEDTLS_SSL_SRV_C)
+#if defined(MBEDTLS_SSL_SRV_C)
     if (session->endpoint == MBEDTLS_SSL_IS_SERVER) {
-        session->ticket_creation_time = mbedtls_ms_time() - 42;
-    }
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+#if defined(MBEDTLS_SSL_EARLY_DATA) && defined(MBEDTLS_SSL_ALPN)
+        int ret = mbedtls_ssl_session_set_ticket_alpn(session, "ALPNExample");
+        if (ret != 0) {
+            return -1;
+        }
 #endif
+#if defined(MBEDTLS_HAVE_TIME)
+        session->ticket_creation_time = mbedtls_ms_time() - 42;
+#endif
+#endif /* MBEDTLS_SSL_SESSION_TICKETS */
+    }
+#endif /* MBEDTLS_SSL_SRV_C */
 
 #if defined(MBEDTLS_SSL_CLI_C)
     if (session->endpoint == MBEDTLS_SSL_IS_CLIENT) {
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
 #if defined(MBEDTLS_HAVE_TIME)
         session->ticket_reception_time = mbedtls_ms_time() - 40;
 #endif
@@ -1790,8 +1831,21 @@ int mbedtls_test_ssl_tls13_populate_session(mbedtls_ssl_session *session,
             }
             memset(session->ticket, 33, ticket_len);
         }
+#if defined(MBEDTLS_SSL_SERVER_NAME_INDICATION)
+        char hostname[] = "hostname example";
+        session->hostname = mbedtls_calloc(1, sizeof(hostname));
+        if (session->hostname == NULL) {
+            return -1;
+        }
+        memcpy(session->hostname, hostname, sizeof(hostname));
+#endif
+#endif /* MBEDTLS_SSL_SESSION_TICKETS */
     }
 #endif /* MBEDTLS_SSL_CLI_C */
+
+#if defined(MBEDTLS_SSL_EARLY_DATA)
+    session->max_early_data_size = 0x87654321;
+#endif /* MBEDTLS_SSL_EARLY_DATA */
 
 #if defined(MBEDTLS_SSL_RECORD_SIZE_LIMIT)
     session->record_size_limit = 2048;
@@ -2006,7 +2060,7 @@ void mbedtls_test_ssl_perform_handshake(
                                                    MBEDTLS_SSL_IS_CLIENT,
                                                    options, &client_context,
                                                    &client_queue,
-                                                   &server_queue, NULL) == 0);
+                                                   &server_queue) == 0);
 #if defined(MBEDTLS_TIMING_C)
         mbedtls_ssl_set_timer_cb(&client.ssl, &timer_client,
                                  mbedtls_timing_set_delay,
@@ -2016,7 +2070,7 @@ void mbedtls_test_ssl_perform_handshake(
         TEST_ASSERT(mbedtls_test_ssl_endpoint_init(&client,
                                                    MBEDTLS_SSL_IS_CLIENT,
                                                    options, NULL, NULL,
-                                                   NULL, NULL) == 0);
+                                                   NULL) == 0);
     }
 
     if (strlen(options->cipher) > 0) {
@@ -2029,7 +2083,7 @@ void mbedtls_test_ssl_perform_handshake(
                                                    MBEDTLS_SSL_IS_SERVER,
                                                    options, &server_context,
                                                    &server_queue,
-                                                   &client_queue, NULL) == 0);
+                                                   &client_queue) == 0);
 #if defined(MBEDTLS_TIMING_C)
         mbedtls_ssl_set_timer_cb(&server.ssl, &timer_server,
                                  mbedtls_timing_set_delay,
@@ -2038,7 +2092,7 @@ void mbedtls_test_ssl_perform_handshake(
     } else {
         TEST_ASSERT(mbedtls_test_ssl_endpoint_init(&server,
                                                    MBEDTLS_SSL_IS_SERVER,
-                                                   options, NULL, NULL, NULL,
+                                                   options, NULL, NULL,
                                                    NULL) == 0);
     }
 
@@ -2462,4 +2516,60 @@ int mbedtls_test_ticket_parse(void *p_ticket, mbedtls_ssl_session *session,
     return mbedtls_ssl_session_load(session, buf, len);
 }
 #endif /* MBEDTLS_SSL_SESSION_TICKETS */
+
+#if defined(MBEDTLS_SSL_CLI_C) && defined(MBEDTLS_SSL_SRV_C) && \
+    defined(MBEDTLS_SSL_PROTO_TLS1_3) && defined(MBEDTLS_SSL_SESSION_TICKETS) && \
+    defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
+int mbedtls_test_get_tls13_ticket(
+    mbedtls_test_handshake_test_options *client_options,
+    mbedtls_test_handshake_test_options *server_options,
+    mbedtls_ssl_session *session)
+{
+    int ret = -1;
+    unsigned char buf[64];
+    mbedtls_test_ssl_endpoint client_ep, server_ep;
+
+    mbedtls_platform_zeroize(&client_ep, sizeof(client_ep));
+    mbedtls_platform_zeroize(&server_ep, sizeof(server_ep));
+
+    ret = mbedtls_test_ssl_endpoint_init(&client_ep, MBEDTLS_SSL_IS_CLIENT,
+                                         client_options, NULL, NULL, NULL);
+    TEST_EQUAL(ret, 0);
+
+    ret = mbedtls_test_ssl_endpoint_init(&server_ep, MBEDTLS_SSL_IS_SERVER,
+                                         server_options, NULL, NULL, NULL);
+    TEST_EQUAL(ret, 0);
+
+    mbedtls_ssl_conf_session_tickets_cb(&server_ep.conf,
+                                        mbedtls_test_ticket_write,
+                                        mbedtls_test_ticket_parse,
+                                        NULL);
+
+    ret = mbedtls_test_mock_socket_connect(&(client_ep.socket),
+                                           &(server_ep.socket), 1024);
+    TEST_EQUAL(ret, 0);
+
+    TEST_EQUAL(mbedtls_test_move_handshake_to_state(
+                   &(server_ep.ssl), &(client_ep.ssl),
+                   MBEDTLS_SSL_HANDSHAKE_OVER), 0);
+
+    TEST_EQUAL(server_ep.ssl.handshake->new_session_tickets_count, 0);
+
+    do {
+        ret = mbedtls_ssl_read(&(client_ep.ssl), buf, sizeof(buf));
+    } while (ret != MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET);
+
+    ret = mbedtls_ssl_get_session(&(client_ep.ssl), session);
+    TEST_EQUAL(ret, 0);
+
+exit:
+    mbedtls_test_ssl_endpoint_free(&client_ep, NULL);
+    mbedtls_test_ssl_endpoint_free(&server_ep, NULL);
+
+    return ret;
+}
+#endif /* MBEDTLS_SSL_CLI_C && MBEDTLS_SSL_SRV_C &&
+          MBEDTLS_SSL_PROTO_TLS1_3 && MBEDTLS_SSL_SESSION_TICKETS &&
+          MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
+
 #endif /* MBEDTLS_SSL_TLS_C */

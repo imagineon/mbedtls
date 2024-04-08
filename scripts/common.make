@@ -1,25 +1,41 @@
 # To compile on SunOS: add "-lsocket -lnsl" to LDFLAGS
 
+ifndef MBEDTLS_PATH
+MBEDTLS_PATH := ..
+endif
+
+ifeq (,$(wildcard $(MBEDTLS_PATH)/framework/exported.make))
+    # Use the define keyword to get a multi-line message.
+    # GNU make appends ".  Stop.", so tweak the ending of our message accordingly.
+    define error_message
+$(MBEDTLS_PATH)/framework/exported.make not found.
+Run `git submodule update --init` to fetch the submodule contents.
+This is a fatal error
+    endef
+    $(error $(error_message))
+endif
+include $(MBEDTLS_PATH)/framework/exported.make
+
 CFLAGS	?= -O2
 WARNING_CFLAGS ?= -Wall -Wextra -Wformat=2 -Wno-format-nonliteral
 WARNING_CXXFLAGS ?= -Wall -Wextra -Wformat=2 -Wno-format-nonliteral
 LDFLAGS ?=
 
-LOCAL_CFLAGS = $(WARNING_CFLAGS) -I$(MBEDTLS_TEST_PATH)/include -I../include -D_FILE_OFFSET_BITS=64
-LOCAL_CXXFLAGS = $(WARNING_CXXFLAGS) -I../include -I../tests/include -D_FILE_OFFSET_BITS=64
+LOCAL_CFLAGS = $(WARNING_CFLAGS) -I$(MBEDTLS_TEST_PATH)/include -I$(MBEDTLS_PATH)/include -D_FILE_OFFSET_BITS=64
+LOCAL_CXXFLAGS = $(WARNING_CXXFLAGS) -I$(MBEDTLS_PATH)/include -I$(MBEDTLS_PATH)/tests/include -D_FILE_OFFSET_BITS=64
 LOCAL_LDFLAGS = ${MBEDTLS_TEST_OBJS} 		\
-		-L../library			\
+		-L$(MBEDTLS_PATH)/library			\
 		-lmbedtls$(SHARED_SUFFIX)	\
 		-lmbedx509$(SHARED_SUFFIX)	\
 		-lmbedcrypto$(SHARED_SUFFIX)
 
-include ../3rdparty/Makefile.inc
+include $(MBEDTLS_PATH)/3rdparty/Makefile.inc
 LOCAL_CFLAGS+=$(THIRDPARTY_INCLUDES)
 
 ifndef SHARED
-MBEDLIBS=../library/libmbedcrypto.a ../library/libmbedx509.a ../library/libmbedtls.a
+MBEDLIBS=$(MBEDTLS_PATH)/library/libmbedcrypto.a $(MBEDTLS_PATH)/library/libmbedx509.a $(MBEDTLS_PATH)/library/libmbedtls.a
 else
-MBEDLIBS=../library/libmbedcrypto.$(DLEXT) ../library/libmbedx509.$(DLEXT) ../library/libmbedtls.$(DLEXT)
+MBEDLIBS=$(MBEDTLS_PATH)/library/libmbedcrypto.$(DLEXT) $(MBEDTLS_PATH)/library/libmbedx509.$(DLEXT) $(MBEDTLS_PATH)/library/libmbedtls.$(DLEXT)
 endif
 
 ifdef DEBUG
@@ -97,7 +113,7 @@ endif
 default: all
 
 $(MBEDLIBS):
-	$(MAKE) -C ../library
+	$(MAKE) -C $(MBEDTLS_PATH)/library
 
 neat: clean
 ifndef WINDOWS

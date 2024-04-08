@@ -665,21 +665,21 @@ struct mbedtls_ssl_handshake_params {
 #if defined(MBEDTLS_SSL_CLI_C)
     /** Minimum TLS version to be negotiated.
      *
-     *  It is set up in the ClientHello writing preparation stage and used
-     *  throughout the ClientHello writing. Not relevant anymore as soon as
-     *  the protocol version has been negotiated thus as soon as the
-     *  ServerHello is received.
-     *  For a fresh handshake not linked to any previous handshake, it is
-     *  equal to the configured minimum minor version to be negotiated. When
-     *  renegotiating or resuming a session, it is equal to the previously
-     *  negotiated minor version.
+     * It is set up in the ClientHello writing preparation stage and used
+     * throughout the ClientHello writing. Not relevant anymore as soon as
+     * the protocol version has been negotiated thus as soon as the
+     * ServerHello is received.
+     * For a fresh handshake not linked to any previous handshake, it is
+     * equal to the configured minimum minor version to be negotiated. When
+     * renegotiating or resuming a session, it is equal to the previously
+     * negotiated minor version.
      *
-     *  There is no maximum TLS version field in this handshake context.
-     *  From the start of the handshake, we need to define a current protocol
-     *  version for the record layer which we define as the maximum TLS
-     *  version to be negotiated. The `tls_version` field of the SSL context is
-     *  used to store this maximum value until it contains the actual
-     *  negotiated value.
+     * There is no maximum TLS version field in this handshake context.
+     * From the start of the handshake, we need to define a current protocol
+     * version for the record layer which we define as the maximum TLS
+     * version to be negotiated. The `tls_version` field of the SSL context is
+     * used to store this maximum value until it contains the actual
+     * negotiated value.
      */
     mbedtls_ssl_protocol_version min_tls_version;
 #endif
@@ -730,15 +730,29 @@ struct mbedtls_ssl_handshake_params {
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
     uint8_t key_exchange_mode; /*!< Selected key exchange mode */
 
-    /** Number of HelloRetryRequest messages received/sent from/to the server. */
-    int hello_retry_request_count;
+    /**
+     * Flag indicating if, in the course of the current handshake, an
+     * HelloRetryRequest message has been sent by the server or received by
+     * the client (<> 0) or not (0).
+     */
+    uint8_t hello_retry_request_flag;
+
+#if defined(MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE)
+    /**
+     * Flag indicating if, in the course of the current handshake, a dummy
+     * change_cipher_spec (CCS) record has already been sent. Used to send only
+     * one CCS per handshake while not complicating the handshake state
+     * transitions for that purpose.
+     */
+    uint8_t ccs_sent;
+#endif
 
 #if defined(MBEDTLS_SSL_SRV_C)
-    /** selected_group of key_share extension in HelloRetryRequest message. */
-    uint16_t hrr_selected_group;
 #if defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_SOME_PSK_ENABLED)
     uint8_t tls13_kex_modes; /*!< Key exchange modes supported by the client */
 #endif
+    /** selected_group of key_share extension in HelloRetryRequest message. */
+    uint16_t hrr_selected_group;
 #if defined(MBEDTLS_SSL_SESSION_TICKETS)
     uint16_t new_session_tickets_count;         /*!< number of session tickets */
 #endif
@@ -2136,6 +2150,60 @@ int mbedtls_ssl_tls13_write_early_data_ext(mbedtls_ssl_context *ssl,
                                            unsigned char *buf,
                                            const unsigned char *end,
                                            size_t *out_len);
+
+int mbedtls_ssl_tls13_check_early_data_len(mbedtls_ssl_context *ssl,
+                                           size_t early_data_len);
+
+typedef enum {
+/*
+ * The client has not sent the first ClientHello yet, the negotiation of early
+ * data has not started yet.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_IDLE,
+
+/*
+ * In its ClientHello, the client has not included an early data indication
+ * extension.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_NO_IND_SENT,
+
+/*
+ * The client has sent an early data indication extension in its first
+ * ClientHello, it has not received the response (ServerHello or
+ * HelloRetryRequest) from the server yet. The transform to protect early data
+ * is not set either as for middlebox compatibility a dummy CCS may have to be
+ * sent in clear. Early data cannot be sent to the server yet.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_IND_SENT,
+
+/*
+ * The client has sent an early data indication extension in its first
+ * ClientHello, it has not received the response (ServerHello or
+ * HelloRetryRequest) from the server yet. The transform to protect early data
+ * has been set and early data can be written now.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_CAN_WRITE,
+
+/*
+ * The client has indicated the use of early data and the server has accepted
+ * it.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_ACCEPTED,
+
+/*
+ * The client has indicated the use of early data but the server has rejected
+ * it.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_REJECTED,
+
+/*
+ * The client has sent an early data indication extension in its first
+ * ClientHello, the server has accepted them and the client has received the
+ * server Finished message. It cannot send early data to the server anymore.
+ */
+    MBEDTLS_SSL_EARLY_DATA_STATE_SERVER_FINISHED_RECEIVED,
+
+} mbedtls_ssl_early_data_state;
 #endif /* MBEDTLS_SSL_EARLY_DATA */
 
 #endif /* MBEDTLS_SSL_PROTO_TLS1_3 */
@@ -2782,6 +2850,13 @@ int mbedtls_ssl_tls13_write_binders_of_pre_shared_key_ext(
 MBEDTLS_CHECK_RETURN_CRITICAL
 int mbedtls_ssl_session_set_hostname(mbedtls_ssl_session *session,
                                      const char *hostname);
+#endif
+
+#if defined(MBEDTLS_SSL_SRV_C) && defined(MBEDTLS_SSL_EARLY_DATA) && \
+    defined(MBEDTLS_SSL_ALPN)
+MBEDTLS_CHECK_RETURN_CRITICAL
+int mbedtls_ssl_session_set_ticket_alpn(mbedtls_ssl_session *session,
+                                        const char *alpn);
 #endif
 
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) && defined(MBEDTLS_SSL_SESSION_TICKETS)
