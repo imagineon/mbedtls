@@ -28,9 +28,22 @@ void mbedtls_test_ssl_log_analyzer(void *ctx, int level,
 {
     mbedtls_test_ssl_log_pattern *p = (mbedtls_test_ssl_log_pattern *) ctx;
 
+/* Change 0 to 1 for debugging of test cases that use this function. */
+#if 0
+    const char *q, *basename;
+    /* Extract basename from file */
+    for (q = basename = file; *q != '\0'; q++) {
+        if (*q == '/' || *q == '\\') {
+            basename = q + 1;
+        }
+    }
+    printf("%s:%04d: |%d| %s",
+           basename, line, level, str);
+#else
     (void) level;
     (void) line;
     (void) file;
+#endif
 
     if (NULL != p &&
         NULL != p->pattern &&
@@ -551,7 +564,10 @@ int mbedtls_test_mock_tcp_recv_msg(void *ctx,
              * happen in test environment, unless forced manually. */
         }
     }
-    mbedtls_test_ssl_message_queue_pop_info(queue, buf_len);
+    ret = mbedtls_test_ssl_message_queue_pop_info(queue, buf_len);
+    if (ret < 0) {
+        return ret;
+    }
 
     return (msg_len > INT_MAX) ? INT_MAX : (int) msg_len;
 }
@@ -636,8 +652,7 @@ int mbedtls_test_ssl_endpoint_certificate_init(mbedtls_test_ssl_endpoint *ep,
             ret = mbedtls_pk_parse_key(
                 cert->pkey,
                 (const unsigned char *) mbedtls_test_srv_key_rsa_der,
-                mbedtls_test_srv_key_rsa_der_len, NULL, 0,
-                mbedtls_test_rnd_std_rand, NULL);
+                mbedtls_test_srv_key_rsa_der_len, NULL, 0);
             TEST_ASSERT(ret == 0);
         } else {
             ret = mbedtls_x509_crt_parse(
@@ -649,8 +664,7 @@ int mbedtls_test_ssl_endpoint_certificate_init(mbedtls_test_ssl_endpoint *ep,
             ret = mbedtls_pk_parse_key(
                 cert->pkey,
                 (const unsigned char *) mbedtls_test_srv_key_ec_der,
-                mbedtls_test_srv_key_ec_der_len, NULL, 0,
-                mbedtls_test_rnd_std_rand, NULL);
+                mbedtls_test_srv_key_ec_der_len, NULL, 0);
             TEST_ASSERT(ret == 0);
         }
     } else {
@@ -664,8 +678,7 @@ int mbedtls_test_ssl_endpoint_certificate_init(mbedtls_test_ssl_endpoint *ep,
             ret = mbedtls_pk_parse_key(
                 cert->pkey,
                 (const unsigned char *) mbedtls_test_cli_key_rsa_der,
-                mbedtls_test_cli_key_rsa_der_len, NULL, 0,
-                mbedtls_test_rnd_std_rand, NULL);
+                mbedtls_test_cli_key_rsa_der_len, NULL, 0);
             TEST_ASSERT(ret == 0);
         } else {
             ret = mbedtls_x509_crt_parse(
@@ -677,8 +690,7 @@ int mbedtls_test_ssl_endpoint_certificate_init(mbedtls_test_ssl_endpoint *ep,
             ret = mbedtls_pk_parse_key(
                 cert->pkey,
                 (const unsigned char *) mbedtls_test_cli_key_ec_der,
-                mbedtls_test_cli_key_ec_der_len, NULL, 0,
-                mbedtls_test_rnd_std_rand, NULL);
+                mbedtls_test_cli_key_ec_der_len, NULL, 0);
             TEST_ASSERT(ret == 0);
         }
     }
@@ -755,7 +767,6 @@ int mbedtls_test_ssl_endpoint_init(
 
     mbedtls_ssl_init(&(ep->ssl));
     mbedtls_ssl_config_init(&(ep->conf));
-    mbedtls_ssl_conf_rng(&(ep->conf), mbedtls_test_random, NULL);
 
     TEST_ASSERT(mbedtls_ssl_conf_get_user_data_p(&ep->conf) == NULL);
     TEST_EQUAL(mbedtls_ssl_conf_get_user_data_n(&ep->conf), 0);
@@ -852,6 +863,10 @@ int mbedtls_test_ssl_endpoint_init(
     ret = mbedtls_ssl_setup(&(ep->ssl), &(ep->conf));
     TEST_ASSERT(ret == 0);
 
+    if (MBEDTLS_SSL_IS_CLIENT == endpoint_type) {
+        ret = mbedtls_ssl_set_hostname(&(ep->ssl), "localhost");
+    }
+
 #if defined(MBEDTLS_SSL_PROTO_DTLS) && defined(MBEDTLS_SSL_SRV_C)
     if (endpoint_type == MBEDTLS_SSL_IS_SERVER && dtls_context != NULL) {
         mbedtls_ssl_conf_dtls_cookies(&(ep->conf), NULL, NULL, NULL);
@@ -947,10 +962,10 @@ int mbedtls_test_move_handshake_to_state(mbedtls_ssl_context *ssl,
 /*
  * Write application data. Increase write counter if necessary.
  */
-int mbedtls_ssl_write_fragment(mbedtls_ssl_context *ssl,
-                               unsigned char *buf, int buf_len,
-                               int *written,
-                               const int expected_fragments)
+static int mbedtls_ssl_write_fragment(mbedtls_ssl_context *ssl,
+                                      unsigned char *buf, int buf_len,
+                                      int *written,
+                                      const int expected_fragments)
 {
     int ret;
     /* Verify that calling mbedtls_ssl_write with a NULL buffer and zero length is
@@ -994,10 +1009,10 @@ exit:
  * Read application data and increase read counter and fragments counter
  * if necessary.
  */
-int mbedtls_ssl_read_fragment(mbedtls_ssl_context *ssl,
-                              unsigned char *buf, int buf_len,
-                              int *read, int *fragments,
-                              const int expected_fragments)
+static int mbedtls_ssl_read_fragment(mbedtls_ssl_context *ssl,
+                                     unsigned char *buf, int buf_len,
+                                     int *read, int *fragments,
+                                     const int expected_fragments)
 {
     int ret;
     /* Verify that calling mbedtls_ssl_write with a NULL buffer and zero length is
@@ -1079,7 +1094,7 @@ static int psk_dummy_callback(void *p_info, mbedtls_ssl_context *ssl,
           MBEDTLS_SSL_SRV_C */
 
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2) && \
-    defined(MBEDTLS_SSL_HAVE_CBC) && defined(MBEDTLS_SSL_HAVE_AES)
+    defined(PSA_WANT_ALG_CBC_NO_PADDING) && defined(PSA_WANT_KEY_TYPE_AES)
 int mbedtls_test_psa_cipher_encrypt_helper(mbedtls_ssl_transform *transform,
                                            const unsigned char *iv,
                                            size_t iv_len,
@@ -1127,8 +1142,8 @@ int mbedtls_test_psa_cipher_encrypt_helper(mbedtls_ssl_transform *transform,
                                 iv, iv_len, input, ilen, output, olen);
 #endif /* MBEDTLS_USE_PSA_CRYPTO */
 }
-#endif /* MBEDTLS_SSL_PROTO_TLS1_2 && MBEDTLS_SSL_HAVE_CBC &&
-          MBEDTLS_SSL_HAVE_AES */
+#endif /* MBEDTLS_SSL_PROTO_TLS1_2 && PSA_WANT_ALG_CBC_NO_PADDING &&
+          PSA_WANT_KEY_TYPE_AES */
 
 static void mbedtls_test_ssl_cipher_info_from_type(mbedtls_cipher_type_t cipher_type,
                                                    mbedtls_cipher_mode_t *cipher_mode,

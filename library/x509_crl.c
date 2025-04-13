@@ -15,12 +15,11 @@
  *  http://www.itu.int/ITU-T/studygroups/com17/languages/X.690-0207.pdf
  */
 
-#include "common.h"
+#include "x509_internal.h"
 
 #if defined(MBEDTLS_X509_CRL_PARSE_C)
 
 #include "mbedtls/x509_crl.h"
-#include "x509_internal.h"
 #include "mbedtls/error.h"
 #include "mbedtls/oid.h"
 #include "mbedtls/platform_util.h"
@@ -583,11 +582,6 @@ int mbedtls_x509_crl_parse_file(mbedtls_x509_crl *chain, const char *path)
 #endif /* MBEDTLS_FS_IO */
 
 #if !defined(MBEDTLS_X509_REMOVE_INFO)
-/*
- * Return an informational string about the certificate.
- */
-#define BEFORE_COLON    14
-#define BC              "14"
 /*
  * Return an informational string about the CRL.
  */

@@ -19,7 +19,7 @@ fi
 THIS_SCRIPT_NAME=$(basename "$0")
 PROG_PATH="../programs/ssl/ssl_context_info"
 OUT_FILE="ssl_context_info.log"
-IN_DIR="data_files/base64"
+IN_DIR="../framework/data_files/base64"
 
 USE_VALGRIND=0
 
@@ -241,16 +241,6 @@ run_test "Default configuration, client" \
          -u "basic constraints.* CA=false$" \
          -n "bytes left to analyze from context"
 
-run_test "Ciphersuite TLS-RSA-WITH-AES-256-CCM-8, server" \
-         "srv_ciphersuite.txt" \
-         -n "ERROR" \
-         -u "ciphersuite.* TLS-RSA-WITH-AES-256-CCM-8$" \
-
-run_test "Ciphersuite TLS-RSA-WITH-AES-256-CCM-8, client" \
-         "cli_ciphersuite.txt" \
-         -n "ERROR" \
-         -u "ciphersuite.* TLS-RSA-WITH-AES-256-CCM-8$" \
-
 run_test "No packing, server" \
          "srv_no_packing.txt" \
          -n "ERROR" \
@@ -401,7 +391,7 @@ run_test "Empty file as input" \
          -u "Finished. No valid base64 code found"
 
 run_test "Not empty file without base64 code" \
-         "../../context-info.sh" \
+         "../../../tests/context-info.sh" \
          -n "Deserializing"
 
 run_test "Binary file instead of text file" \

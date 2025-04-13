@@ -6,11 +6,16 @@ ifneq (,$(filter-out lib library/%,$(or $(MAKECMDGOALS),all)))
     ifeq (,$(wildcard framework/exported.make))
         # Use the define keyword to get a multi-line message.
         # GNU make appends ".  Stop.", so tweak the ending of our message accordingly.
-        define error_message
-$(MBEDTLS_PATH)/framework/exported.make not found.
-Run `git submodule update --init` to fetch the submodule contents.
+        ifneq (,$(wildcard .git))
+            define error_message
+${MBEDTLS_PATH}/framework/exported.make not found (and does appear to be a git checkout). Run `git submodule update --init` from the source tree to fetch the submodule contents.
 This is a fatal error
-        endef
+            endef
+        else
+            define error_message
+${MBEDTLS_PATH}/framework/exported.make not found (and does not appear to be a git checkout). Please ensure you have downloaded the right archive from the release page on GitHub.
+            endef
+        endif
         $(error $(error_message))
     endif
     include framework/exported.make
@@ -28,20 +33,30 @@ no_test: programs
 programs: lib mbedtls_test
 	$(MAKE) -C programs
 
+ssl-opt: lib mbedtls_test
+	$(MAKE) -C programs ssl-opt
+	$(MAKE) -C tests ssl-opt
+
 lib:
 	$(MAKE) -C library
 
-tests: lib mbedtls_test
+ifndef PSASIM
+tests: lib
+endif
+tests: mbedtls_test
 	$(MAKE) -C tests
 
 mbedtls_test:
 	$(MAKE) -C tests mbedtls_test
 
-library/%:
+.PHONY: FORCE
+FORCE:
+
+library/%: FORCE
 	$(MAKE) -C library $*
-programs/%:
+programs/%: FORCE
 	$(MAKE) -C programs $*
-tests/%:
+tests/%: FORCE
 	$(MAKE) -C tests $*
 
 .PHONY: generated_files
@@ -82,6 +97,8 @@ visualc_files: $(VISUALC_FILES)
 # present before it runs. It doesn't matter if the files aren't up-to-date,
 # they just need to be present.
 $(VISUALC_FILES): | library/generated_files
+$(VISUALC_FILES): | programs/generated_files
+$(VISUALC_FILES): | tests/generated_files
 $(VISUALC_FILES): $(gen_file_dep) scripts/generate_visualc_files.pl
 $(VISUALC_FILES): $(gen_file_dep) scripts/data_files/vs2017-app-template.vcxproj
 $(VISUALC_FILES): $(gen_file_dep) scripts/data_files/vs2017-main-template.vcxproj
@@ -95,8 +112,9 @@ ifndef WINDOWS
 install: no_test
 	mkdir -p $(DESTDIR)/include/mbedtls
 	cp -rp include/mbedtls $(DESTDIR)/include
+	cp -rp tf-psa-crypto/drivers/builtin/include/mbedtls $(DESTDIR)/include
 	mkdir -p $(DESTDIR)/include/psa
-	cp -rp include/psa $(DESTDIR)/include
+	cp -rp tf-psa-crypto/include/psa $(DESTDIR)/include
 
 	mkdir -p $(DESTDIR)/lib
 	cp -RP library/libmbedtls.*    $(DESTDIR)/lib
@@ -167,7 +185,10 @@ else
 	if exist visualc\VS2017\mbedTLS.sln del /Q /F visualc\VS2017\mbedTLS.sln
 endif
 
-check: lib tests
+ifndef PSASIM
+check: lib
+endif
+check: tests
 	$(MAKE) -C tests check
 
 test: check
@@ -193,14 +214,23 @@ endif
 
 ## Editor navigation files
 C_SOURCE_FILES = $(wildcard \
-	3rdparty/*/include/*/*.h 3rdparty/*/include/*/*/*.h 3rdparty/*/include/*/*/*/*.h \
-	3rdparty/*/*.c 3rdparty/*/*/*.c 3rdparty/*/*/*/*.c 3rdparty/*/*/*/*/*.c \
 	include/*/*.h \
 	library/*.[hc] \
+	tf-psa-crypto/core/*.[hc] \
+	tf-psa-crypto/include/*/*.h \
+	tf-psa-crypto/drivers/*/include/*/*.h \
+	tf-psa-crypto/drivers/*/include/*/*/*.h \
+	tf-psa-crypto/drivers/*/include/*/*/*/*.h \
+	tf-psa-crypto/drivers/builtin/src/*.[hc] \
+	tf-psa-crypto/drivers/*/*.c \
+	tf-psa-crypto/drivers/*/*/*.c \
+	tf-psa-crypto/drivers/*/*/*/*.c \
+	tf-psa-crypto/drivers/*/*/*/*/*.c \
 	programs/*/*.[hc] \
-	tests/include/*/*.h tests/include/*/*/*.h \
-	tests/src/*.c tests/src/*/*.c \
+	framework/tests/include/*/*.h framework/tests/include/*/*/*.h \
+	framework/tests/src/*.c framework/tests/src/*/*.c \
 	tests/suites/*.function \
+	tf-psa-crypto/tests/suites/*.function \
 )
 # Exuberant-ctags invocation. Other ctags implementations may require different options.
 CTAGS = ctags --langmap=c:+.h.function --line-directives=no -o
@@ -213,5 +243,8 @@ GPATH GRTAGS GSYMS GTAGS: $(C_SOURCE_FILES)
 	ls $(C_SOURCE_FILES) | gtags -f - --gtagsconf .globalrc
 cscope: cscope.in.out cscope.po.out cscope.out
 cscope.in.out cscope.po.out cscope.out: $(C_SOURCE_FILES)
-	cscope -bq -u -Iinclude -Ilibrary $(patsubst %,-I%,$(wildcard 3rdparty/*/include)) -Itests/include $(C_SOURCE_FILES)
+	cscope -bq -u -Iinclude -Ilibrary -Itf-psa-crypto/core \
+        -Itf-psa-crypto/include \
+	-Itf-psa-crypto/drivers/builtin/src \
+	$(patsubst %,-I%,$(wildcard tf-psa-crypto/drivers/*/include)) -Iframework/tests/include $(C_SOURCE_FILES)
 .PHONY: cscope global

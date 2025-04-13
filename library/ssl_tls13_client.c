@@ -5,7 +5,7 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
-#include "common.h"
+#include "ssl_misc.h"
 
 #if defined(MBEDTLS_SSL_CLI_C) && defined(MBEDTLS_SSL_PROTO_TLS1_3)
 
@@ -15,7 +15,6 @@
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
 
-#include "ssl_misc.h"
 #include "ssl_client.h"
 #include "ssl_tls13_keys.h"
 #include "ssl_debug_helpers.h"
@@ -217,7 +216,7 @@ static int ssl_tls13_get_default_group_id(mbedtls_ssl_context *ssl,
 
 
 #if defined(PSA_WANT_ALG_ECDH) || defined(PSA_WANT_ALG_FFDH)
-    const uint16_t *group_list = mbedtls_ssl_get_groups(ssl);
+    const uint16_t *group_list = ssl->conf->group_list;
     /* Pick first available ECDHE group compatible with TLS 1.3 */
     if (group_list == NULL) {
         return MBEDTLS_ERR_SSL_BAD_CONFIG;
@@ -319,6 +318,7 @@ static int ssl_tls13_write_key_share_ext(mbedtls_ssl_context *ssl,
             ssl, group_id, p, end, &key_exchange_len);
         p += key_exchange_len;
         if (ret != 0) {
+            MBEDTLS_SSL_DEBUG_MSG(1, ("client hello: failed generating xxdh key exchange"));
             return ret;
         }
 
@@ -382,7 +382,7 @@ static int ssl_tls13_parse_hrr_key_share_ext(mbedtls_ssl_context *ssl,
     int selected_group;
     int found = 0;
 
-    const uint16_t *group_list = mbedtls_ssl_get_groups(ssl);
+    const uint16_t *group_list = ssl->conf->group_list;
     if (group_list == NULL) {
         return MBEDTLS_ERR_SSL_BAD_CONFIG;
     }

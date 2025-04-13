@@ -40,7 +40,7 @@ There are currently three active build systems used within Mbed TLS releases:
 
 The main systems used for development are CMake and GNU Make. Those systems are always complete and up-to-date. The others should reflect all changes present in the CMake and Make build system, although features may not be ported there automatically.
 
-The Make and CMake build systems create three libraries: libmbedcrypto, libmbedx509, and libmbedtls. Note that libmbedtls depends on libmbedx509 and libmbedcrypto, and libmbedx509 depends on libmbedcrypto. As a result, some linkers will expect flags to be in a specific order, for example the GNU linker wants `-lmbedtls -lmbedx509 -lmbedcrypto`.
+The Make and CMake build systems create three libraries: libmbedcrypto/libtfpsacrypto, libmbedx509, and libmbedtls. Note that libmbedtls depends on libmbedx509 and libmbedcrypto/libtfpsacrypto, and libmbedx509 depends on libmbedcrypto/libtfpsacrypto. As a result, some linkers will expect flags to be in a specific order, for example the GNU linker wants `-lmbedtls -lmbedx509 -lmbedcrypto`.
 
 ### Tool versions
 
@@ -79,7 +79,7 @@ Any of the following methods are available to generate the configuration-indepen
 * If not cross-compiling, running `make` with any target, or just `make`, will automatically generate required files.
 * On non-Windows systems, when not cross-compiling, CMake will generate the required files automatically.
 * Run `make generated_files` to generate all the configuration-independent files.
-* On Unix/POSIX systems, run `tests/scripts/check-generated-files.sh -u` to generate all the configuration-independent files.
+* On Unix/POSIX systems, run `framework/scripts/make_generated_files.py` to generate all the configuration-independent files.
 * On Windows, run `scripts\make_generated_files.bat` to generate all the configuration-independent files.
 
 ### Make
@@ -200,7 +200,7 @@ CMake projects. You can include Mbed TLS's CMake targets yourself with:
 If prompted, set `MbedTLS_DIR` to `${YOUR_MBEDTLS_INSTALL_DIR}/cmake`. This
 creates the following targets:
 
-- `MbedTLS::mbedcrypto` (Crypto library)
+- `MbedTLS::tfpsacrypto` (Crypto library)
 - `MbedTLS::mbedtls` (TLS library)
 - `MbedTLS::mbedx509` (X509 library)
 
@@ -210,7 +210,7 @@ You can then use these directly through `target_link_libraries()`:
 
     target_link_libraries(xyz
         PUBLIC MbedTLS::mbedtls
-               MbedTLS::mbedcrypto
+               MbedTLS::tfpsacrypto
                MbedTLS::mbedx509)
 
 This will link the Mbed TLS libraries to your library or application, and add
@@ -240,7 +240,7 @@ Please note that the goal of these sample programs is to demonstrate specific fe
 Tests
 -----
 
-Mbed TLS includes an elaborate test suite in `tests/` that initially requires Python to generate the tests files (e.g. `test\_suite\_mpi.c`). These files are generated from a `function file` (e.g. `suites/test\_suite\_mpi.function`) and a `data file` (e.g. `suites/test\_suite\_mpi.data`). The `function file` contains the test functions. The `data file` contains the test cases, specified as parameters that will be passed to the test function.
+Mbed TLS includes an elaborate test suite in `tests/` that initially requires Python to generate the tests files (e.g. `test\_suite\_ssl.c`). These files are generated from a `function file` (e.g. `suites/test\_suite\_ssl.function`) and a `data file` (e.g. `suites/test\_suite\_ssl.data`). The `function file` contains the test functions. The `data file` contains the test cases, specified as parameters that will be passed to the test function.
 
 For machines with a Unix shell and OpenSSL (and optionally GnuTLS) installed, additional test scripts are available:
 
@@ -295,18 +295,11 @@ Arm welcomes feedback on the design of the API. If you think something could be 
 Mbed TLS includes a reference implementation of the PSA Cryptography API.
 However, it does not aim to implement the whole specification; in particular it does not implement all the algorithms.
 
-The X.509 and TLS code can use PSA cryptography for most operations. To enable this support, activate the compilation option `MBEDTLS_USE_PSA_CRYPTO` in `mbedtls_config.h`. Note that TLS 1.3 uses PSA cryptography for most operations regardless of this option. See `docs/use-psa-crypto.md` for details.
-
 ### PSA drivers
 
 Mbed TLS supports drivers for cryptographic accelerators, secure elements and random generators. This is work in progress. Please note that the driver interfaces are not fully stable yet and may change without notice. We intend to preserve backward compatibility for application code (using the PSA Crypto API), but the code of the drivers may have to change in future minor releases of Mbed TLS.
 
-Please see the [PSA driver example and guide](docs/psa-driver-example-and-guide.md) for information on writing a driver.
-
-When using drivers, you will generally want to enable two compilation options (see the reference manual for more information):
-
-* `MBEDTLS_USE_PSA_CRYPTO` is necessary so that the X.509 and TLS code calls the PSA drivers rather than the built-in software implementation.
-* `MBEDTLS_PSA_CRYPTO_CONFIG` allows you to enable PSA cryptographic mechanisms without including the code of the corresponding software implementation. This is not yet supported for all mechanisms.
+Please see the [PSA driver example and guide](https://github.com/Mbed-TLS/TF-PSA-Crypto/blob/development/docs/psa-driver-example-and-guide.md) for information on writing a driver.
 
 License
 -------
@@ -315,10 +308,10 @@ Unless specifically indicated otherwise in a file, Mbed TLS files are provided u
 
 ### Third-party code included in Mbed TLS
 
-This project contains code from other projects. This code is located within the `3rdparty/` directory. The original license text is included within project subdirectories, where it differs from the normal Mbed TLS license, and/or in source files. The projects are listed below:
+This project contains code from other projects. This code is located within the `tf-psa-crypto/drivers/` directory. The original license text is included within project subdirectories, where it differs from the normal Mbed TLS license, and/or in source files. The projects are listed below:
 
-* `3rdparty/everest/`: Files stem from [Project Everest](https://project-everest.github.io/) and are distributed under the Apache 2.0 license.
-* `3rdparty/p256-m/p256-m/`: Files have been taken from the [p256-m](https://github.com/mpg/p256-m) repository. The code in the original repository is distributed under the Apache 2.0 license. It is distributed in Mbed TLS under a dual Apache-2.0 OR GPL-2.0-or-later license with permission from the author.
+* `drivers/everest/`: Files stem from [Project Everest](https://project-everest.github.io/) and are distributed under the Apache 2.0 license.
+* `drivers/p256-m/p256-m/`: Files have been taken from the [p256-m](https://github.com/mpg/p256-m) repository. The code in the original repository is distributed under the Apache 2.0 license. It is distributed in Mbed TLS under a dual Apache-2.0 OR GPL-2.0-or-later license with permission from the author.
 
 Contributing
 ------------

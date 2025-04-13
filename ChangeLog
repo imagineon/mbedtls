@@ -144,6 +144,7 @@ Security
    * Fix a stack buffer overread (less than 256 bytes) when parsing a TLS 1.3
      ClientHello in a TLS 1.3 server supporting some PSK key exchange mode. A
      malicious client could cause information disclosure or a denial of service.
+     Fixes CVE-2024-30166.
    * Passing buffers that are stored in untrusted memory as arguments
      to PSA functions is now secure by default.
      The PSA core now protects against modification of inputs or exposure
@@ -2415,9 +2416,9 @@ Changes
      fit into the record buffer. Previously, such extensions were silently
      dropped. As a consequence, the TLS handshake now fails when the output
      buffer is not large enough to hold the ClientHello.
-   * The unit tests now rely on header files in tests/include/test and source
-     files in tests/src. When building with make or cmake, the files in
-     tests/src are compiled and the resulting object linked into each test
+   * The unit tests now rely on header files in framework/tests/include/test and source
+     files in framework/tests/src. When building with make or cmake, the files in
+     framework/tests/src are compiled and the resulting object linked into each test
      executable.
    * The ECP module, enabled by `MBEDTLS_ECP_C`, now depends on
      `MBEDTLS_CTR_DRBG_C` or `MBEDTLS_HMAC_DRBG_C` for some side-channel

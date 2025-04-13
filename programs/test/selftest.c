@@ -5,12 +5,13 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
+
 #include "mbedtls/build_info.h"
 
 #include "mbedtls/entropy.h"
 #include "mbedtls/hmac_drbg.h"
 #include "mbedtls/ctr_drbg.h"
-#include "mbedtls/dhm.h"
 #include "mbedtls/gcm.h"
 #include "mbedtls/ccm.h"
 #include "mbedtls/cmac.h"
@@ -241,7 +242,7 @@ static void create_entropy_seed_file(void)
 }
 #endif
 
-int mbedtls_entropy_self_test_wrapper(int verbose)
+static int mbedtls_entropy_self_test_wrapper(int verbose)
 {
 #if defined(MBEDTLS_ENTROPY_NV_SEED) && !defined(MBEDTLS_NO_PLATFORM_ENTROPY)
     create_entropy_seed_file();
@@ -252,7 +253,7 @@ int mbedtls_entropy_self_test_wrapper(int verbose)
 
 #if defined(MBEDTLS_SELF_TEST)
 #if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
-int mbedtls_memory_buffer_alloc_free_and_self_test(int verbose)
+static int mbedtls_memory_buffer_alloc_free_and_self_test(int verbose)
 {
     if (verbose != 0) {
 #if defined(MBEDTLS_MEMORY_DEBUG)
@@ -349,9 +350,6 @@ const selftest_t selftests[] =
 #endif
 #if defined(MBEDTLS_ECJPAKE_C)
     { "ecjpake", mbedtls_ecjpake_self_test },
-#endif
-#if defined(MBEDTLS_DHM_C)
-    { "dhm", mbedtls_dhm_self_test },
 #endif
 #if defined(MBEDTLS_ENTROPY_C)
     { "entropy", mbedtls_entropy_self_test_wrapper },

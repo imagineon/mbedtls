@@ -11,9 +11,18 @@
 
 use warnings;
 use strict;
+use Getopt::Long;
 use Digest::MD5 'md5_hex';
 
+# Declare variables for options
 my $vsx_dir = "visualc/VS2017";
+my $list = 0; # Default off
+
+GetOptions(
+    "directory=s" => \$vsx_dir, # Target directory
+    "list"        => \$list     # Only list generated files
+) or die "Invalid options\n";
+
 my $vsx_ext = "vcxproj";
 my $vsx_app_tpl_file = "scripts/data_files/vs2017-app-template.$vsx_ext";
 my $vsx_main_tpl_file = "scripts/data_files/vs2017-main-template.$vsx_ext";
@@ -21,22 +30,32 @@ my $vsx_main_file = "$vsx_dir/mbedTLS.$vsx_ext";
 my $vsx_sln_tpl_file = "scripts/data_files/vs2017-sln-template.sln";
 my $vsx_sln_file = "$vsx_dir/mbedTLS.sln";
 
-my $programs_dir = 'programs';
+my $mbedtls_programs_dir = "programs";
+my $framework_programs_dir = "framework/tests/programs";
+my $tfpsacrypto_programs_dir = "tf-psa-crypto/programs";
+
 my $mbedtls_header_dir = 'include/mbedtls';
-my $psa_header_dir = 'include/psa';
-my $source_dir = 'library';
-my $test_source_dir = 'tests/src';
-my $test_header_dir = 'tests/include/test';
-my $test_drivers_header_dir = 'tests/include/test/drivers';
-my $test_drivers_source_dir = 'tests/src/drivers';
+my $drivers_builtin_header_dir = 'tf-psa-crypto/drivers/builtin/include/mbedtls';
+my $psa_header_dir = 'tf-psa-crypto/include/psa';
+my $tls_source_dir = 'library';
+my $crypto_core_source_dir = 'tf-psa-crypto/core';
+my $crypto_source_dir = 'tf-psa-crypto/drivers/builtin/src';
+my $tls_test_source_dir = 'tests/src';
+my $tls_test_header_dir = 'tests/include/test';
+my $crypto_test_source_dir = 'tf-psa-crypto/tests/src';
+my $crypto_test_header_dir = 'tf-psa-crypto/tests/include/test';
+my $test_source_dir = 'framework/tests/src';
+my $test_header_dir = 'framework/tests/include/test';
+my $test_drivers_header_dir = 'framework/tests/include/test/drivers';
+my $test_drivers_source_dir = 'framework/tests/src/drivers';
 
 my @thirdparty_header_dirs = qw(
-    3rdparty/everest/include/everest
+    tf-psa-crypto/drivers/everest/include/everest
 );
 my @thirdparty_source_dirs = qw(
-    3rdparty/everest/library
-    3rdparty/everest/library/kremlib
-    3rdparty/everest/library/legacy
+    tf-psa-crypto/drivers/everest/library
+    tf-psa-crypto/drivers/everest/library/kremlib
+    tf-psa-crypto/drivers/everest/library/legacy
 );
 
 # Directories to add to the include path.
@@ -44,25 +63,32 @@ my @thirdparty_source_dirs = qw(
 # one directory: the compiler will use the first match.
 my @include_directories = qw(
     include
-    3rdparty/everest/include/
-    3rdparty/everest/include/everest
-    3rdparty/everest/include/everest/vs2013
-    3rdparty/everest/include/everest/kremlib
+    tf-psa-crypto/include
+    tf-psa-crypto/drivers/builtin/include
+    tf-psa-crypto/drivers/everest/include/
+    tf-psa-crypto/drivers/everest/include/everest
+    tf-psa-crypto/drivers/everest/include/everest/vs2013
+    tf-psa-crypto/drivers/everest/include/everest/kremlib
     tests/include
+    tf-psa-crypto/tests/include
+    framework/tests/include
+    framework/tests/programs
 );
 my $include_directories = join(';', map {"../../$_"} @include_directories);
 
-# Directories to add to the include path when building the library, but not
+# Directories to add to the include path when building the libraries, but not
 # when building tests or applications.
 my @library_include_directories = qw(
     library
+    tf-psa-crypto/core
+    tf-psa-crypto/drivers/builtin/src
 );
 my $library_include_directories =
   join(';', map {"../../$_"} (@library_include_directories,
                               @include_directories));
 
 my @excluded_files = qw(
-    3rdparty/everest/library/Hacl_Curve25519.c
+    tf-psa-crypto/drivers/everest/library/Hacl_Curve25519.c
 );
 my %excluded_files = ();
 foreach (@excluded_files) { $excluded_files{$_} = 1 }
@@ -101,13 +127,22 @@ sub check_dirs {
     }
     return -d $vsx_dir
         && -d $mbedtls_header_dir
+        && -d $drivers_builtin_header_dir
         && -d $psa_header_dir
-        && -d $source_dir
+        && -d $tls_source_dir
+        && -d $crypto_core_source_dir
+        && -d $crypto_source_dir
         && -d $test_source_dir
+        && -d $tls_test_source_dir
+        && -d $crypto_test_source_dir
         && -d $test_drivers_source_dir
         && -d $test_header_dir
+        && -d $tls_test_header_dir
+        && -d $crypto_test_header_dir
         && -d $test_drivers_header_dir
-        && -d $programs_dir;
+        && -d $mbedtls_programs_dir
+        && -d $framework_programs_dir
+        && -d $tfpsacrypto_programs_dir;
 }
 
 sub slurp_file {
@@ -146,7 +181,14 @@ sub gen_app {
     (my $appname = $path) =~ s/.*\\//;
     my $is_test_app = ($path =~ m/^test\\/);
 
-    my $srcs = "<ClCompile Include=\"..\\..\\programs\\$path.c\" \/>";
+    my $srcs;
+    if( $appname eq "metatest" or $appname eq "query_compile_time_config" or
+        $appname eq "query_included_headers" or $appname eq "zeroize" ) {
+        $srcs = "<ClCompile Include=\"..\\..\\framework\\tests\\programs\\$appname.c\" \/>";
+    } else {
+        $srcs = "<ClCompile Include=\"..\\..\\programs\\$path.c\" \/>";
+    }
+
     if( $appname eq "ssl_client2" or $appname eq "ssl_server2" or
         $appname eq "query_compile_time_config" ) {
         $srcs .= "\n    <ClCompile Include=\"..\\..\\programs\\test\\query_config.c\" \/>";
@@ -252,21 +294,33 @@ sub main {
 
     # Remove old files to ensure that, for example, project files from deleted
     # apps are not kept
-    del_vsx_files();
+    if (not $list) {
+        del_vsx_files();
+    }
 
     my @app_list = get_app_list();
     my @header_dirs = (
                        $mbedtls_header_dir,
+                       $drivers_builtin_header_dir,
                        $psa_header_dir,
                        $test_header_dir,
+                       $tls_test_header_dir,
+                       $crypto_test_header_dir,
                        $test_drivers_header_dir,
-                       $source_dir,
+                       $tls_source_dir,
+                       $crypto_core_source_dir,
+                       $crypto_source_dir,
+                       $framework_programs_dir,
                        @thirdparty_header_dirs,
                       );
     my @headers = (map { <$_/*.h> } @header_dirs);
     my @source_dirs = (
-                       $source_dir,
+                       $tls_source_dir,
+                       $crypto_core_source_dir,
+                       $crypto_source_dir,
                        $test_source_dir,
+                       $tls_test_source_dir,
+                       $crypto_test_source_dir,
                        $test_drivers_source_dir,
                        @thirdparty_source_dirs,
                       );
@@ -277,13 +331,22 @@ sub main {
     map { s!/!\\!g } @headers;
     map { s!/!\\!g } @sources;
 
-    gen_app_files( @app_list );
+    if ($list) {
+        foreach my $app (@app_list) {
+            $app =~ s/.*\///;
+            print "$vsx_dir/$app.$vsx_ext\n";
+        }
+        print "$vsx_main_file\n";
+        print "$vsx_sln_file\n";
+    } else {
+        gen_app_files( @app_list );
 
-    gen_main_file( \@headers, \@sources,
-                   $vsx_hdr_tpl, $vsx_src_tpl,
-                   $vsx_main_tpl_file, $vsx_main_file );
+        gen_main_file( \@headers, \@sources,
+                       $vsx_hdr_tpl, $vsx_src_tpl,
+                       $vsx_main_tpl_file, $vsx_main_file );
 
-    gen_vsx_solution( @app_list );
+        gen_vsx_solution( @app_list );
+    }
 
     return 0;
 }

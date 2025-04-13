@@ -5,7 +5,7 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
-#include "common.h"
+#include "ssl_misc.h"
 
 #if defined(MBEDTLS_SSL_TLS_C) && defined(MBEDTLS_SSL_PROTO_TLS1_3)
 
@@ -19,7 +19,6 @@
 #include "psa/crypto.h"
 #include "mbedtls/psa_util.h"
 
-#include "ssl_misc.h"
 #include "ssl_tls13_invasive.h"
 #include "ssl_tls13_keys.h"
 #include "ssl_debug_helpers.h"
@@ -193,10 +192,12 @@ static void ssl_tls13_create_verify_structure(const unsigned char *transcript_ha
     idx = 64;
 
     if (from == MBEDTLS_SSL_IS_CLIENT) {
-        memcpy(verify_buffer + idx, MBEDTLS_SSL_TLS1_3_LBL_WITH_LEN(client_cv));
+        memcpy(verify_buffer + idx, mbedtls_ssl_tls13_labels.client_cv,
+               MBEDTLS_SSL_TLS1_3_LBL_LEN(client_cv));
         idx += MBEDTLS_SSL_TLS1_3_LBL_LEN(client_cv);
     } else { /* from == MBEDTLS_SSL_IS_SERVER */
-        memcpy(verify_buffer + idx, MBEDTLS_SSL_TLS1_3_LBL_WITH_LEN(server_cv));
+        memcpy(verify_buffer + idx, mbedtls_ssl_tls13_labels.server_cv,
+               MBEDTLS_SSL_TLS1_3_LBL_LEN(server_cv));
         idx += MBEDTLS_SSL_TLS1_3_LBL_LEN(server_cv);
     }
 
@@ -470,6 +471,7 @@ int mbedtls_ssl_tls13_parse_certificate(mbedtls_ssl_context *ssl,
         mbedtls_free(ssl->session_negotiate->peer_cert);
     }
 
+    /* This is used by ssl_tls13_validate_certificate() */
     if (certificate_list_len == 0) {
         ssl->session_negotiate->peer_cert = NULL;
         ret = 0;
@@ -516,7 +518,7 @@ int mbedtls_ssl_tls13_parse_certificate(mbedtls_ssl_context *ssl,
         switch (ret) {
             case 0: /*ok*/
                 break;
-            case MBEDTLS_ERR_X509_UNKNOWN_SIG_ALG + MBEDTLS_ERR_OID_NOT_FOUND:
+            case MBEDTLS_ERR_OID_NOT_FOUND:
                 /* Ignore certificate with an unknown algorithm: maybe a
                    prior certificate was already trusted. */
                 break;
@@ -625,25 +627,13 @@ int mbedtls_ssl_tls13_parse_certificate(mbedtls_ssl_context *ssl,
 MBEDTLS_CHECK_RETURN_CRITICAL
 static int ssl_tls13_validate_certificate(mbedtls_ssl_context *ssl)
 {
-    int ret = 0;
-    int authmode = MBEDTLS_SSL_VERIFY_REQUIRED;
-    mbedtls_x509_crt *ca_chain;
-    mbedtls_x509_crl *ca_crl;
-    const char *ext_oid;
-    size_t ext_len;
-    uint32_t verify_result = 0;
-
-    /* If SNI was used, overwrite authentication mode
-     * from the configuration. */
-#if defined(MBEDTLS_SSL_SRV_C)
-    if (ssl->conf->endpoint == MBEDTLS_SSL_IS_SERVER) {
-#if defined(MBEDTLS_SSL_SERVER_NAME_INDICATION)
-        if (ssl->handshake->sni_authmode != MBEDTLS_SSL_VERIFY_UNSET) {
-            authmode = ssl->handshake->sni_authmode;
-        } else
-#endif
-        authmode = ssl->conf->authmode;
-    }
+    /* Authmode: precedence order is SNI if used else configuration */
+#if defined(MBEDTLS_SSL_SRV_C) && defined(MBEDTLS_SSL_SERVER_NAME_INDICATION)
+    const int authmode = ssl->handshake->sni_authmode != MBEDTLS_SSL_VERIFY_UNSET
+                       ? ssl->handshake->sni_authmode
+                       : ssl->conf->authmode;
+#else
+    const int authmode = ssl->conf->authmode;
 #endif
 
     /*
@@ -675,6 +665,11 @@ static int ssl_tls13_validate_certificate(mbedtls_ssl_context *ssl)
 #endif /* MBEDTLS_SSL_SRV_C */
 
 #if defined(MBEDTLS_SSL_CLI_C)
+        /* Regardless of authmode, the server is not allowed to send an empty
+         * certificate chain. (Last paragraph before 4.4.2.1 in RFC 8446: "The
+         * server's certificate_list MUST always be non-empty.") With authmode
+         * optional/none, we continue the handshake if we can't validate the
+         * server's cert, but we still break it if no certificate was sent. */
         if (ssl->conf->endpoint == MBEDTLS_SSL_IS_CLIENT) {
             MBEDTLS_SSL_PEND_FATAL_ALERT(MBEDTLS_SSL_ALERT_MSG_NO_CERT,
                                          MBEDTLS_ERR_SSL_FATAL_ALERT_MESSAGE);
@@ -683,114 +678,9 @@ static int ssl_tls13_validate_certificate(mbedtls_ssl_context *ssl)
 #endif /* MBEDTLS_SSL_CLI_C */
     }
 
-#if defined(MBEDTLS_SSL_SERVER_NAME_INDICATION)
-    if (ssl->handshake->sni_ca_chain != NULL) {
-        ca_chain = ssl->handshake->sni_ca_chain;
-        ca_crl = ssl->handshake->sni_ca_crl;
-    } else
-#endif /* MBEDTLS_SSL_SERVER_NAME_INDICATION */
-    {
-        ca_chain = ssl->conf->ca_chain;
-        ca_crl = ssl->conf->ca_crl;
-    }
-
-    /*
-     * Main check: verify certificate
-     */
-    ret = mbedtls_x509_crt_verify_with_profile(
-        ssl->session_negotiate->peer_cert,
-        ca_chain, ca_crl,
-        ssl->conf->cert_profile,
-        ssl->hostname,
-        &verify_result,
-        ssl->conf->f_vrfy, ssl->conf->p_vrfy);
-
-    if (ret != 0) {
-        MBEDTLS_SSL_DEBUG_RET(1, "x509_verify_cert", ret);
-    }
-
-    /*
-     * Secondary checks: always done, but change 'ret' only if it was 0
-     */
-    if (ssl->conf->endpoint == MBEDTLS_SSL_IS_CLIENT) {
-        ext_oid = MBEDTLS_OID_SERVER_AUTH;
-        ext_len = MBEDTLS_OID_SIZE(MBEDTLS_OID_SERVER_AUTH);
-    } else {
-        ext_oid = MBEDTLS_OID_CLIENT_AUTH;
-        ext_len = MBEDTLS_OID_SIZE(MBEDTLS_OID_CLIENT_AUTH);
-    }
-
-    if ((mbedtls_x509_crt_check_key_usage(
-             ssl->session_negotiate->peer_cert,
-             MBEDTLS_X509_KU_DIGITAL_SIGNATURE) != 0) ||
-        (mbedtls_x509_crt_check_extended_key_usage(
-             ssl->session_negotiate->peer_cert,
-             ext_oid, ext_len) != 0)) {
-        MBEDTLS_SSL_DEBUG_MSG(1, ("bad certificate (usage extensions)"));
-        if (ret == 0) {
-            ret = MBEDTLS_ERR_SSL_BAD_CERTIFICATE;
-        }
-    }
-
-    /* mbedtls_x509_crt_verify_with_profile is supposed to report a
-     * verification failure through MBEDTLS_ERR_X509_CERT_VERIFY_FAILED,
-     * with details encoded in the verification flags. All other kinds
-     * of error codes, including those from the user provided f_vrfy
-     * functions, are treated as fatal and lead to a failure of
-     * mbedtls_ssl_tls13_parse_certificate even if verification was optional.
-     */
-    if (authmode == MBEDTLS_SSL_VERIFY_OPTIONAL &&
-        (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED ||
-         ret == MBEDTLS_ERR_SSL_BAD_CERTIFICATE)) {
-        ret = 0;
-    }
-
-    if (ca_chain == NULL && authmode == MBEDTLS_SSL_VERIFY_REQUIRED) {
-        MBEDTLS_SSL_DEBUG_MSG(1, ("got no CA chain"));
-        ret = MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED;
-    }
-
-    if (ret != 0) {
-        /* The certificate may have been rejected for several reasons.
-           Pick one and send the corresponding alert. Which alert to send
-           may be a subject of debate in some cases. */
-        if (verify_result & MBEDTLS_X509_BADCERT_OTHER) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(
-                MBEDTLS_SSL_ALERT_MSG_ACCESS_DENIED, ret);
-        } else if (verify_result & MBEDTLS_X509_BADCERT_CN_MISMATCH) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(MBEDTLS_SSL_ALERT_MSG_BAD_CERT, ret);
-        } else if (verify_result & (MBEDTLS_X509_BADCERT_KEY_USAGE |
-                                    MBEDTLS_X509_BADCERT_EXT_KEY_USAGE |
-                                    MBEDTLS_X509_BADCERT_NS_CERT_TYPE |
-                                    MBEDTLS_X509_BADCERT_BAD_PK |
-                                    MBEDTLS_X509_BADCERT_BAD_KEY)) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(
-                MBEDTLS_SSL_ALERT_MSG_UNSUPPORTED_CERT, ret);
-        } else if (verify_result & MBEDTLS_X509_BADCERT_EXPIRED) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(
-                MBEDTLS_SSL_ALERT_MSG_CERT_EXPIRED, ret);
-        } else if (verify_result & MBEDTLS_X509_BADCERT_REVOKED) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(
-                MBEDTLS_SSL_ALERT_MSG_CERT_REVOKED, ret);
-        } else if (verify_result & MBEDTLS_X509_BADCERT_NOT_TRUSTED) {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(MBEDTLS_SSL_ALERT_MSG_UNKNOWN_CA, ret);
-        } else {
-            MBEDTLS_SSL_PEND_FATAL_ALERT(
-                MBEDTLS_SSL_ALERT_MSG_CERT_UNKNOWN, ret);
-        }
-    }
-
-#if defined(MBEDTLS_DEBUG_C)
-    if (verify_result != 0) {
-        MBEDTLS_SSL_DEBUG_MSG(3, ("! Certificate verification flags %08x",
-                                  (unsigned int) verify_result));
-    } else {
-        MBEDTLS_SSL_DEBUG_MSG(3, ("Certificate verification flags clear"));
-    }
-#endif /* MBEDTLS_DEBUG_C */
-
-    ssl->session_negotiate->verify_result = verify_result;
-    return ret;
+    return mbedtls_ssl_verify_certificate(ssl, authmode,
+                                          ssl->session_negotiate->peer_cert,
+                                          NULL, NULL);
 }
 #else /* MBEDTLS_SSL_KEEP_PEER_CERTIFICATE */
 MBEDTLS_CHECK_RETURN_CRITICAL
@@ -1088,8 +978,7 @@ static int ssl_tls13_write_certificate_verify_body(mbedtls_ssl_context *ssl,
 
         if ((ret = mbedtls_pk_sign_ext(pk_type, own_key,
                                        md_alg, verify_hash, verify_hash_len,
-                                       p + 4, (size_t) (end - (p + 4)), &signature_len,
-                                       ssl->conf->f_rng, ssl->conf->p_rng)) != 0) {
+                                       p + 4, (size_t) (end - (p + 4)), &signature_len)) != 0) {
             MBEDTLS_SSL_DEBUG_MSG(2, ("CertificateVerify signature failed with %s",
                                       mbedtls_ssl_sig_alg_to_str(*sig_alg)));
             MBEDTLS_SSL_DEBUG_RET(2, "mbedtls_pk_sign_ext", ret);
@@ -1482,9 +1371,11 @@ int mbedtls_ssl_tls13_check_early_data_len(mbedtls_ssl_context *ssl,
          ssl->total_early_data_size)) {
 
         MBEDTLS_SSL_DEBUG_MSG(
-            2, ("EarlyData: Too much early data received, %u + %" MBEDTLS_PRINTF_SIZET " > %u",
-                ssl->total_early_data_size, early_data_len,
-                ssl->session_negotiate->max_early_data_size));
+            2, ("EarlyData: Too much early data received, "
+                "%lu + %" MBEDTLS_PRINTF_SIZET " > %lu",
+                (unsigned long) ssl->total_early_data_size,
+                early_data_len,
+                (unsigned long) ssl->session_negotiate->max_early_data_size));
 
         MBEDTLS_SSL_PEND_FATAL_ALERT(
             MBEDTLS_SSL_ALERT_MSG_UNEXPECTED_MESSAGE,

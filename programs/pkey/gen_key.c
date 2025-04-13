@@ -5,6 +5,8 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
+
 #include "mbedtls/build_info.h"
 
 #include "mbedtls/platform.h"
@@ -22,11 +24,9 @@ int main(void)
 }
 #else
 
-#include "mbedtls/error.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/ecdsa.h"
 #include "mbedtls/rsa.h"
-#include "mbedtls/error.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 
@@ -39,8 +39,8 @@ int main(void)
 
 #define DEV_RANDOM_THRESHOLD        32
 
-int dev_random_entropy_poll(void *data, unsigned char *output,
-                            size_t len, size_t *olen)
+static int dev_random_entropy_poll(void *data, unsigned char *output,
+                                   size_t len, size_t *olen)
 {
     FILE *file;
     size_t ret, left = len;
@@ -453,8 +453,9 @@ exit:
 
     if (exit_code != MBEDTLS_EXIT_SUCCESS) {
 #ifdef MBEDTLS_ERROR_C
-        mbedtls_strerror(ret, buf, sizeof(buf));
-        mbedtls_printf(" - %s\n", buf);
+        mbedtls_printf("Error code: %d", ret);
+        /* mbedtls_strerror(ret, buf, sizeof(buf));
+           mbedtls_printf(" - %s\n", buf); */
 #else
         mbedtls_printf("\n");
 #endif
