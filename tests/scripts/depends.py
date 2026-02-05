@@ -30,11 +30,11 @@ The configuration building method can be one of the three following:
   direct dependencies, but rather non-trivial results of other configs missing. Then
   look for any unset symbols and handle their reverse dependencies.
   Examples of EXCLUSIVE_GROUPS usage:
-  - MBEDTLS_SHA512_C job turns off all hashes except SHA512. MBEDTLS_SSL_COOKIE_C
+  - PSA_WANT_ALG_SHA_512 job turns off all hashes except SHA512. MBEDTLS_SSL_COOKIE_C
     requires either SHA256 or SHA384 to work, so it also has to be disabled.
-    This is not a dependency on SHA512_C, but a result of an exclusive domain
+    This is not a dependency on SHA512, but a result of an exclusive domain
     config building method. Relevant field:
-    'MBEDTLS_SHA512_C': ['-MBEDTLS_SSL_COOKIE_C'],
+    'PSA_WANT_ALG_SHA_512': ['-MBEDTLS_SSL_COOKIE_C'],
 
 - DualDomain - combination of the two above - both complementary and exclusive domain
   job generation code will be run. Currently only used for hashes.
@@ -245,125 +245,69 @@ and subsequent commands are tests that cannot run if the build failed).'''
 REVERSE_DEPENDENCIES = {
     'PSA_WANT_KEY_TYPE_AES': ['PSA_WANT_ALG_PBKDF2_AES_CMAC_PRF_128',
                               'MBEDTLS_CTR_DRBG_C',
-                              'MBEDTLS_NIST_KW_C',
-                              'MBEDTLS_AES_C'],
-    'PSA_WANT_KEY_TYPE_ARIA': ['MBEDTLS_ARIA_C'],
-    'PSA_WANT_KEY_TYPE_CAMELLIA': ['MBEDTLS_CAMELLIA_C'],
+                              'MBEDTLS_NIST_KW_C'],
     'PSA_WANT_KEY_TYPE_CHACHA20': ['PSA_WANT_ALG_CHACHA20_POLY1305',
-                                   'PSA_WANT_ALG_STREAM_CIPHER',
-                                   'MBEDTLS_CHACHA20_C',
-                                   'MBEDTLS_CHACHAPOLY_C'],
-    'PSA_WANT_KEY_TYPE_DES': ['MBEDTLS_DES_C'],
-    'PSA_WANT_ALG_CCM': ['PSA_WANT_ALG_CCM_STAR_NO_TAG',
-                         'MBEDTLS_CCM_C'],
-    'PSA_WANT_ALG_CMAC': ['PSA_WANT_ALG_PBKDF2_AES_CMAC_PRF_128',
-                          'MBEDTLS_CMAC_C'],
-    'PSA_WANT_ALG_GCM': ['MBEDTLS_GCM_C'],
+                                   'PSA_WANT_ALG_STREAM_CIPHER'],
+    'PSA_WANT_ALG_CCM': ['PSA_WANT_ALG_CCM_STAR_NO_TAG'],
+    'PSA_WANT_ALG_CMAC': ['PSA_WANT_ALG_PBKDF2_AES_CMAC_PRF_128'],
 
-    'PSA_WANT_ALG_CBC_NO_PADDING': ['MBEDTLS_CIPHER_MODE_CBC'],
-    'PSA_WANT_ALG_CBC_PKCS7': ['MBEDTLS_CIPHER_MODE_CBC'],
-    'PSA_WANT_ALG_CFB': ['MBEDTLS_CIPHER_MODE_CFB'],
-    'PSA_WANT_ALG_CTR': ['MBEDTLS_CIPHER_MODE_CTR'],
-    'PSA_WANT_ALG_OFB': ['MBEDTLS_CIPHER_MODE_OFB'],
-    'PSA_WANT_ALG_XTS': ['MBEDTLS_CIPHER_MODE_XTS'],
+    'PSA_WANT_ECC_SECP_R1_256': ['PSA_WANT_ALG_JPAKE'],
 
-    'MBEDTLS_CIPHER_PADDING_PKCS7': ['MBEDTLS_PKCS5_C',
-                                     'MBEDTLS_PKCS12_C',
-                                     'PSA_WANT_ALG_CBC_PKCS7'],
-    'MBEDTLS_CIPHER_PADDING_ONE_AND_ZEROS': ['MBEDTLS_CIPHER_MODE_CBC'],
-    'MBEDTLS_CIPHER_PADDING_ZEROS': ['MBEDTLS_CIPHER_MODE_CBC'],
-    'MBEDTLS_CIPHER_PADDING_ZEROS_AND_LEN': ['MBEDTLS_CIPHER_MODE_CBC'],
+    'PSA_WANT_ALG_ECDSA': ['PSA_WANT_ALG_DETERMINISTIC_ECDSA',
+                           'MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED'],
+    'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_BASIC': [
+        'PSA_WANT_ALG_ECDSA',
+        'PSA_WANT_ALG_ECDH',
+        'PSA_WANT_ALG_JPAKE',
+        'PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY',
+        'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT',
+        'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT',
+        'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_DERIVE',
+        'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE',
+        'MBEDTLS_ECP_RESTARTABLE',
+        'MBEDTLS_PK_PARSE_EC_EXTENDED',
+        'MBEDTLS_PK_PARSE_EC_COMPRESSED',
+        'MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED',
+        'MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED',
+        'MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED',
+        'MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED'],
+    'PSA_WANT_ALG_JPAKE': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED'],
+    'PSA_WANT_ALG_RSA_OAEP': ['PSA_WANT_ALG_RSA_PSS',
+                              'MBEDTLS_X509_RSASSA_PSS_SUPPORT'],
+    'PSA_WANT_ALG_RSA_PKCS1V15_CRYPT': ['PSA_WANT_ALG_RSA_PKCS1V15_SIGN',
+                                        'MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED'],
+    'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC': [
+        'PSA_WANT_ALG_RSA_PKCS1V15_CRYPT',
+        'PSA_WANT_ALG_RSA_OAEP',
+        'PSA_WANT_KEY_TYPE_RSA_PUBLIC_KEY',
+        'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_IMPORT',
+        'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_EXPORT',
+        'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_GENERATE'],
 
-    'PSA_WANT_ECC_BRAINPOOL_P_R1_256': ['MBEDTLS_ECP_DP_BP256R1_ENABLED'],
-    'PSA_WANT_ECC_BRAINPOOL_P_R1_384': ['MBEDTLS_ECP_DP_BP384R1_ENABLED'],
-    'PSA_WANT_ECC_BRAINPOOL_P_R1_512': ['MBEDTLS_ECP_DP_BP512R1_ENABLED'],
-    'PSA_WANT_ECC_MONTGOMERY_255': ['MBEDTLS_ECP_DP_CURVE25519_ENABLED'],
-    'PSA_WANT_ECC_MONTGOMERY_448': ['MBEDTLS_ECP_DP_CURVE448_ENABLED'],
-    'PSA_WANT_ECC_SECP_R1_192': ['MBEDTLS_ECP_DP_SECP192R1_ENABLED'],
-    'PSA_WANT_ECC_SECP_R1_224': ['MBEDTLS_ECP_DP_SECP224R1_ENABLED'],
-    'PSA_WANT_ECC_SECP_R1_256': ['MBEDTLS_ECJPAKE_C',
-                                 'MBEDTLS_ECP_DP_SECP256R1_ENABLED'],
-    'PSA_WANT_ECC_SECP_R1_384': ['MBEDTLS_ECP_DP_SECP384R1_ENABLED'],
-    'PSA_WANT_ECC_SECP_R1_521': ['MBEDTLS_ECP_DP_SECP521R1_ENABLED'],
-    'PSA_WANT_ECC_SECP_K1_192': ['MBEDTLS_ECP_DP_SECP192K1_ENABLED'],
-    'PSA_WANT_ECC_SECP_K1_256': ['MBEDTLS_ECP_DP_SECP256K1_ENABLED'],
-
-    'MBEDTLS_ECDSA_C': ['MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED',
-                        'MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED',
-                        'PSA_WANT_ALG_ECDSA',
-                        'PSA_WANT_ALG_DETERMINISTIC_ECDSA'],
-    'MBEDTLS_ECP_C': ['MBEDTLS_ECDSA_C',
-                      'MBEDTLS_ECDH_C', 'PSA_WANT_ALG_ECDH',
-                      'MBEDTLS_ECJPAKE_C',
-                      'MBEDTLS_ECP_RESTARTABLE',
-                      'MBEDTLS_PK_PARSE_EC_EXTENDED',
-                      'MBEDTLS_PK_PARSE_EC_COMPRESSED',
-                      'MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED',
-                      'MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED',
-                      'MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED',
-                      'MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED',
-                      'MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED',
-                      'PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY',
-                      'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_BASIC',
-                      'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT',
-                      'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT',
-                      'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE',
-                      'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_DERIVE'],
-    'MBEDTLS_ECJPAKE_C': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED',
-                          'PSA_WANT_ALG_JPAKE'],
-    'MBEDTLS_PKCS1_V21': ['MBEDTLS_X509_RSASSA_PSS_SUPPORT',
-                          'PSA_WANT_ALG_RSA_OAEP',
-                          'PSA_WANT_ALG_RSA_PSS'],
-    'MBEDTLS_PKCS1_V15': ['MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED',
-                          'PSA_WANT_ALG_RSA_PKCS1V15_CRYPT',
-                          'PSA_WANT_ALG_RSA_PKCS1V15_SIGN'],
-    'MBEDTLS_RSA_C': ['MBEDTLS_PKCS1_V15',
-                      'MBEDTLS_PKCS1_V21',
-                      'MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED',
-                      'PSA_WANT_KEY_TYPE_RSA_PUBLIC_KEY',
-                      'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC',
-                      'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_IMPORT',
-                      'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_EXPORT',
-                      'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_GENERATE'],
-
-    'MBEDTLS_MD5_C' : ['PSA_WANT_ALG_MD5'],
-    'MBEDTLS_RIPEMD160_C' : ['PSA_WANT_ALG_RIPEMD160'],
-    'MBEDTLS_SHA1_C' : ['PSA_WANT_ALG_SHA_1'],
-    'MBEDTLS_SHA224_C': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED',
-                         'MBEDTLS_ENTROPY_FORCE_SHA256',
-                         'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT',
-                         'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_ONLY',
-                         'PSA_WANT_ALG_SHA_224'],
-    'MBEDTLS_SHA256_C': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED',
-                         'MBEDTLS_ENTROPY_FORCE_SHA256',
-                         'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT',
-                         'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_ONLY',
-                         'MBEDTLS_LMS_C',
-                         'MBEDTLS_LMS_PRIVATE',
-                         'PSA_WANT_ALG_SHA_256',
-                         'PSA_WANT_ALG_TLS12_ECJPAKE_TO_PMS'],
-    'MBEDTLS_SHA384_C' : ['PSA_WANT_ALG_SHA_384'],
-    'MBEDTLS_SHA512_C': ['MBEDTLS_SHA512_USE_A64_CRYPTO_IF_PRESENT',
-                         'MBEDTLS_SHA512_USE_A64_CRYPTO_ONLY',
-                         'PSA_WANT_ALG_SHA_512'],
-    'MBEDTLS_SHA3_C' : ['PSA_WANT_ALG_SHA3_224',
-                        'PSA_WANT_ALG_SHA3_256',
-                        'PSA_WANT_ALG_SHA3_384',
-                        'PSA_WANT_ALG_SHA3_512'],
+    'PSA_WANT_ALG_SHA_224': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED',
+                             'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT',
+                             'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_ONLY'],
+    'PSA_WANT_ALG_SHA_256': ['MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED',
+                             'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT',
+                             'MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_ONLY',
+                             'MBEDTLS_LMS_C',
+                             'MBEDTLS_LMS_PRIVATE',
+                             'PSA_WANT_ALG_TLS12_ECJPAKE_TO_PMS'],
+    'PSA_WANT_ALG_SHA_512': ['MBEDTLS_SHA512_USE_A64_CRYPTO_IF_PRESENT',
+                             'MBEDTLS_SHA512_USE_A64_CRYPTO_ONLY'],
+    'PSA_WANT_ALG_ECB_NO_PADDING' : ['MBEDTLS_NIST_KW_C'],
 }
 
 # If an option is tested in an exclusive test, alter the following defines.
 # These are not necessarily dependencies, but just minimal required changes
 # if a given define is the only one enabled from an exclusive group.
 EXCLUSIVE_GROUPS = {
-    'MBEDTLS_SHA512_C': ['-MBEDTLS_SSL_COOKIE_C',
-                         '-MBEDTLS_SSL_TLS_C'],
-    'PSA_WANT_ECC_MONTGOMERY_448': ['-MBEDTLS_ECDSA_C',
-                                    '-MBEDTLS_ECDSA_DETERMINISTIC',
-                                    '-MBEDTLS_ECJPAKE_C',],
-    'PSA_WANT_ECC_MONTGOMERY_255': ['-MBEDTLS_ECDSA_C',
-                                    '-MBEDTLS_ECDSA_DETERMINISTIC',
-                                    '-MBEDTLS_ECJPAKE_C'],
+    'PSA_WANT_ALG_SHA_512': ['-MBEDTLS_SSL_COOKIE_C',
+                             '-MBEDTLS_SSL_TLS_C'],
+    'PSA_WANT_ECC_MONTGOMERY_448': ['-PSA_WANT_ALG_ECDSA',
+                                    '-PSA_WANT_ALG_JPAKE',],
+    'PSA_WANT_ECC_MONTGOMERY_255': ['-PSA_WANT_ALG_ECDSA',
+                                    '-PSA_WANT_ALG_JPAKE'],
     'PSA_WANT_KEY_TYPE_ARIA': ['-PSA_WANT_ALG_CMAC',
                                '-PSA_WANT_ALG_CCM',
                                '-PSA_WANT_ALG_GCM',
@@ -374,10 +318,6 @@ EXCLUSIVE_GROUPS = {
                                    '-PSA_WANT_ALG_CCM',
                                    '-PSA_WANT_ALG_GCM',
                                    '-PSA_WANT_ALG_ECB_NO_PADDING'],
-    'PSA_WANT_KEY_TYPE_DES': ['-PSA_WANT_ALG_CCM',
-                              '-PSA_WANT_ALG_GCM',
-                              '-MBEDTLS_SSL_TICKET_C',
-                              '-MBEDTLS_SSL_CONTEXT_SERIALIZATION'],
 }
 def handle_exclusive_groups(config_settings, symbol):
     """For every symbol tested in an exclusive group check if there are other
@@ -489,8 +429,9 @@ class DomainData:
     # pylint: disable=too-many-locals
     def __init__(self, options, conf):
         """Gather data about the library and establish a list of domains to test."""
-        build_command = [options.make_command, 'CFLAGS=-Werror -O2']
-        build_and_test = [build_command, [options.make_command, 'test']]
+        build_command = [options.make_command, '-f', 'scripts/legacy.make', 'CFLAGS=-Werror -O2']
+        build_and_test = [build_command, [options.make_command, '-f',
+                                          'scripts/legacy.make', 'test']]
         self.all_config_symbols = set(conf.settings.keys())
         psa_info = psa_information.Information().constructors
         algs = {crypto_knowledge.Algorithm(alg): symbol
@@ -506,13 +447,13 @@ class DomainData:
                                           for expr in psa_info.generate_expressions([key_type]))
                      if symbol in self.all_config_symbols}
 
-        # Find hash modules by name.
-        hash_symbols = self.config_symbols_matching(r'MBEDTLS_(MD|RIPEMD|SHA)[0-9]+_C\Z')
+        # Find hash modules by category.
+        hash_symbols = {symbol
+                        for alg, symbol in algs.items()
+                        if alg.can_do(crypto_knowledge.AlgorithmCategory.HASH)}
 
-        # Find elliptic curve enabling macros
-        # MBEDTLS_ECP_DP_SECP224K1_ENABLED added to disable it for all curves
-        curve_symbols = self.config_symbols_matching(r'PSA_WANT_ECC_\w+\Z|'
-                                                     r'MBEDTLS_ECP_DP_SECP224K1_ENABLED')
+        # Find elliptic curve enabling macros by name.
+        curve_symbols = self.config_symbols_matching(r'PSA_WANT_ECC_\w+\Z')
 
         # Find key exchange enabling macros by name.
         key_exchange_symbols = self.config_symbols_matching(r'MBEDTLS_KEY_EXCHANGE_\w+_ENABLED\Z')
@@ -526,9 +467,6 @@ class DomainData:
         # Get cipher modes
         cipher_chaining_symbols = {algs[cipher_alg] for cipher_alg in cipher_algs}
 
-        # Find block padding mode enabling macros by name.
-        cipher_padding_symbols = self.config_symbols_matching(r'MBEDTLS_CIPHER_PADDING_\w+\Z')
-
         self.domains = {
             # Cipher key types
             'cipher_id': ExclusiveDomain(cipher_key_types, build_and_test),
@@ -539,30 +477,25 @@ class DomainData:
                                                build_and_test,
                                                exclude=r'PSA_WANT_ALG_XTS'),
 
-            'cipher_padding': ExclusiveDomain(cipher_padding_symbols,
-                                              build_and_test),
-
             # Elliptic curves. Run the test suites.
-            'curves': ExclusiveDomain(curve_symbols, build_and_test,
-                                      exclude=r'MBEDTLS_ECP_DP_SECP224K1_ENABLED'),
+            'curves': ExclusiveDomain(curve_symbols, build_and_test),
 
-            # Hash algorithms. Excluding exclusive domains of MD, RIPEMD, SHA1,
-            # SHA224 and SHA384 because MBEDTLS_ENTROPY_C is extensively used
+            # Hash algorithms. Excluding exclusive domains of MD, RIPEMD, SHA1, SHA3*,
+            # SHA224 and SHA384 because the built-in entropy module is extensively used
             # across various modules, but it depends on either SHA256 or SHA512.
             # As a consequence an "exclusive" test of anything other than SHA256
-            # or SHA512 with MBEDTLS_ENTROPY_C enabled is not possible.
+            # or SHA512 with the built-in entropy module enabled is not possible.
             'hashes': DualDomain(hash_symbols, build_and_test,
-                                 exclude=r'MBEDTLS_(MD|RIPEMD|SHA1_)' \
-                                          '|MBEDTLS_SHA224_' \
-                                          '|MBEDTLS_SHA384_' \
-                                          '|MBEDTLS_SHA3_'),
+                                 exclude=r'PSA_WANT_ALG_(?!SHA_(256|512))'),
+
             # Key exchange types.
             'kex': ExclusiveDomain(key_exchange_symbols, build_and_test),
-            'pkalgs': ComplementaryDomain(['MBEDTLS_ECDSA_C',
-                                           'MBEDTLS_ECP_C',
-                                           'MBEDTLS_PKCS1_V21',
-                                           'MBEDTLS_PKCS1_V15',
-                                           'MBEDTLS_RSA_C',
+
+            'pkalgs': ComplementaryDomain(['PSA_WANT_ALG_ECDSA',
+                                           'PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_BASIC',
+                                           'PSA_WANT_ALG_RSA_OAEP',
+                                           'PSA_WANT_ALG_RSA_PKCS1V15_CRYPT',
+                                           'PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC',
                                            'MBEDTLS_X509_RSASSA_PSS_SUPPORT'],
                                           build_and_test),
         }
@@ -581,7 +514,7 @@ A name can either be the name of a domain or the name of one specific job."""
 
 def run(options, job, conf, colors=NO_COLORS):
     """Run the specified job (a Job instance)."""
-    subprocess.check_call([options.make_command, 'clean'])
+    subprocess.check_call([options.make_command, '-f', 'scripts/legacy.make', 'clean'])
     job.announce(colors, None)
     if not job.configure(conf, colors):
         job.announce(colors, False)
@@ -636,8 +569,8 @@ def main():
             description=
             "Test Mbed TLS with a subset of algorithms.\n\n"
             "Example usage:\n"
-            r"./tests/scripts/depends.py \!MBEDTLS_SHA1_C MBEDTLS_SHA256_C""\n"
-            "./tests/scripts/depends.py MBEDTLS_AES_C hashes\n"
+            r"./tests/scripts/depends.py \!PSA_WANT_ALG_SHA_1 PSA_WANT_ALG_SHA_256""\n"
+            "./tests/scripts/depends.py PSA_WANT_KEY_TYPE_AES hashes\n"
             "./tests/scripts/depends.py cipher_id cipher_chaining\n")
         parser.add_argument('--color', metavar='WHEN',
                             help='Colorize the output (always/auto/never)',

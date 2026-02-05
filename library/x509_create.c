@@ -12,7 +12,9 @@
 #include "mbedtls/asn1write.h"
 #include "mbedtls/error.h"
 #include "mbedtls/oid.h"
+#include "x509_oid.h"
 
+#include <limits.h>
 #include <string.h>
 
 #include "mbedtls/platform.h"
@@ -314,7 +316,7 @@ static int oid_subidentifier_encode_into(unsigned char **p,
     size_t num_bytes = oid_subidentifier_num_bytes(value);
 
     if ((size_t) (bound - *p) < num_bytes) {
-        return MBEDTLS_ERR_OID_BUF_TOO_SMALL;
+        return PSA_ERROR_BUFFER_TOO_SMALL;
     }
     (*p)[num_bytes - 1] = (unsigned char) (value & 0x7f);
     value >>= 7;
@@ -467,8 +469,12 @@ int mbedtls_x509_string_to_names(mbedtls_asn1_named_data **head, const char *nam
     unsigned char data[MBEDTLS_X509_MAX_DN_NAME_SIZE];
     size_t data_len = 0;
 
-    /* Clear existing chain if present */
-    mbedtls_asn1_free_named_data_list(head);
+    /* Ensure the output parameter is not already populated.
+     * (If it were, overwriting it would likely cause a memory leak.)
+     */
+    if (*head != NULL) {
+        return MBEDTLS_ERR_X509_BAD_INPUT_DATA;
+    }
 
     while (c <= end) {
         if (in_attr_type && *c == '=') {
@@ -640,7 +646,7 @@ int mbedtls_x509_write_names(unsigned char **p, unsigned char *start,
 int mbedtls_x509_write_sig(unsigned char **p, unsigned char *start,
                            const char *oid, size_t oid_len,
                            unsigned char *sig, size_t size,
-                           mbedtls_pk_type_t pk_alg)
+                           mbedtls_pk_sigalg_t pk_alg)
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
     int write_null_par;
@@ -666,7 +672,7 @@ int mbedtls_x509_write_sig(unsigned char **p, unsigned char *start,
 
     // Write OID
     //
-    if (pk_alg == MBEDTLS_PK_ECDSA) {
+    if (pk_alg == MBEDTLS_PK_SIGALG_ECDSA) {
         /*
          * The AlgorithmIdentifier's parameters field must be absent for DSA/ECDSA signature
          * algorithms, see https://www.rfc-editor.org/rfc/rfc5480#page-17 and

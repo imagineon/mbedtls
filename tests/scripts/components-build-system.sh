@@ -11,7 +11,7 @@
 
 component_test_make_shared () {
     msg "build/test: make shared" # ~ 40s
-    make SHARED=1 TEST_CPP=1 all check
+    $MAKE_COMMAND SHARED=1 TEST_CPP=1 all check
     ldd programs/util/strerror | grep libmbedcrypto
     $FRAMEWORK/tests/programs/dlopen_demo.sh
 }
@@ -58,14 +58,16 @@ support_test_cmake_out_of_source () {
 component_test_cmake_out_of_source () {
     # Remove existing generated files so that we use the ones cmake
     # generates
-    make neat
+    $MAKE_COMMAND neat
 
     msg "build: cmake 'out-of-source' build"
     MBEDTLS_ROOT_DIR="$PWD"
     mkdir "$OUT_OF_SOURCE_DIR"
     cd "$OUT_OF_SOURCE_DIR"
     # Note: Explicitly generate files as these are turned off in releases
-    cmake -D CMAKE_BUILD_TYPE:String=Check -D GEN_FILES=ON -D TEST_CPP=1 "$MBEDTLS_ROOT_DIR"
+    # Note: Use Clang compiler also for C++ (C uses it by default)
+    CXX=clang++ cmake -D CMAKE_BUILD_TYPE:String=Check -D GEN_FILES=ON \
+                      -D TEST_CPP=1 "$MBEDTLS_ROOT_DIR"
     make
 
     msg "test: cmake 'out-of-source' build"
@@ -88,7 +90,7 @@ component_test_cmake_out_of_source () {
 component_test_cmake_as_subdirectory () {
     # Remove existing generated files so that we use the ones CMake
     # generates
-    make neat
+    $MAKE_COMMAND neat
 
     msg "build: cmake 'as-subdirectory' build"
     cd programs/test/cmake_subproject
@@ -105,7 +107,7 @@ support_test_cmake_as_subdirectory () {
 component_test_cmake_as_package () {
     # Remove existing generated files so that we use the ones CMake
     # generates
-    make neat
+    $MAKE_COMMAND neat
 
     msg "build: cmake 'as-package' build"
     root_dir="$(pwd)"
@@ -130,12 +132,22 @@ support_test_cmake_as_package () {
 component_test_cmake_as_package_install () {
     # Remove existing generated files so that we use the ones CMake
     # generates
-    make neat
+    $MAKE_COMMAND neat
 
     msg "build: cmake 'as-installed-package' build"
     cd programs/test/cmake_package_install
     cmake .
     make
+
+    if ! cmp -s "mbedtls/lib/libtfpsacrypto.a" "mbedtls/lib/libmbedcrypto.a"; then
+        echo "Error: Crypto static libraries are different or one of them is missing/unreadable." >&2
+        exit 1
+    fi
+    if ! cmp -s "mbedtls/lib/libtfpsacrypto.so" "mbedtls/lib/libmbedcrypto.so"; then
+        echo "Error: Crypto shared libraries are different or one of them is missing/unreadable." >&2
+        exit 1
+    fi
+
     ./cmake_package_install
 }
 

@@ -141,7 +141,7 @@ static int ssl_write_alpn_ext(mbedtls_ssl_context *ssl,
      *     ProtocolName protocol_name_list<2..2^16-1>
      * } ProtocolNameList;
      */
-    for (const char **cur = ssl->conf->alpn_list; *cur != NULL; cur++) {
+    for (const char *const *cur = ssl->conf->alpn_list; *cur != NULL; cur++) {
         /*
          * mbedtls_ssl_conf_set_alpn_protocols() checked that the length of
          * protocol names is less than 255.
@@ -943,8 +943,8 @@ int mbedtls_ssl_write_client_hello(mbedtls_ssl_context *ssl)
          */
         mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_SERVER_HELLO);
 
-        if ((ret = mbedtls_ssl_write_handshake_msg(ssl)) != 0) {
-            MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg", ret);
+        if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
+            MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
             return ret;
         }
 

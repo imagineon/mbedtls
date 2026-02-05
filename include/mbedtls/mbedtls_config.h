@@ -19,7 +19,7 @@
  * It is equal to the #MBEDTLS_VERSION_NUMBER of the Mbed TLS version that
  * introduced the config format we want to be compatible with.
  */
-//#define MBEDTLS_CONFIG_VERSION 0x03000000
+#define MBEDTLS_CONFIG_VERSION 0x04000000
 
 /**
  * \name SECTION: Platform abstraction layer
@@ -192,6 +192,18 @@
  */
 
 /**
+ * \def MBEDTLS_SSL_NULL_CIPHERSUITES
+ *
+ * Enable ciphersuites without encryption.
+ *
+ * Warning: Only do so when you know what you are doing. This allows for
+ * channels without any encryption. All data are transmitted in clear.
+ *
+ * Uncomment this macro to enable the NULL ciphersuites
+ */
+//#define MBEDTLS_SSL_NULL_CIPHERSUITES
+
+/**
  * \def MBEDTLS_DEBUG_C
  *
  * Enable the debug functions.
@@ -211,8 +223,8 @@
  *
  * Enable the ECDHE-ECDSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C or PSA_WANT_ALG_ECDH
- *           MBEDTLS_ECDSA_C or PSA_WANT_ALG_ECDSA
+ * Requires: PSA_WANT_ALG_ECDH
+ *           PSA_WANT_ALG_ECDSA
  *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
@@ -235,7 +247,7 @@
  *
  * Enable the ECDHE-PSK based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C or PSA_WANT_ALG_ECDH
+ * Requires: PSA_WANT_ALG_ECDH
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -253,9 +265,8 @@
  *
  * Enable the ECDHE-RSA based ciphersuite modes in SSL / TLS.
  *
- * Requires: MBEDTLS_ECDH_C or PSA_WANT_ALG_ECDH
- *           MBEDTLS_RSA_C
- *           MBEDTLS_PKCS1_V15
+ * Requires: PSA_WANT_ALG_ECDH
+ *           PSA_WANT_ALG_RSA_PKCS1V15_SIGN
  *           MBEDTLS_X509_CRT_PARSE_C
  *
  * This enables the following ciphersuites (if other requisites are
@@ -274,54 +285,6 @@
 #define MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
 
 /**
- * \def MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED
- *
- * Enable the ECDH-ECDSA based ciphersuite modes in SSL / TLS.
- *
- * Requires: MBEDTLS_ECDH_C or PSA_WANT_ALG_ECDH
- *           MBEDTLS_ECDSA_C or PSA_WANT_ALG_ECDSA
- *           MBEDTLS_X509_CRT_PARSE_C
- *
- * This enables the following ciphersuites (if other requisites are
- * enabled as well):
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256
- *      MBEDTLS_TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384
- */
-#define MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED
-
-/**
- * \def MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
- *
- * Enable the ECDH-RSA based ciphersuite modes in SSL / TLS.
- *
- * Requires: MBEDTLS_ECDH_C or PSA_WANT_ALG_ECDH
- *           MBEDTLS_RSA_C
- *           MBEDTLS_X509_CRT_PARSE_C
- *
- * This enables the following ciphersuites (if other requisites are
- * enabled as well):
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_128_CBC_SHA
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_256_CBC_SHA
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256
- *      MBEDTLS_TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384
- *      MBEDTLS_TLS_ECDH_RSA_WITH_CAMELLIA_128_CBC_SHA256
- *      MBEDTLS_TLS_ECDH_RSA_WITH_CAMELLIA_256_CBC_SHA384
- *      MBEDTLS_TLS_ECDH_RSA_WITH_CAMELLIA_128_GCM_SHA256
- *      MBEDTLS_TLS_ECDH_RSA_WITH_CAMELLIA_256_GCM_SHA384
- */
-#define MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
-
-/**
  * \def MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED
  *
  * Enable the ECJPAKE based ciphersuite modes in SSL / TLS.
@@ -330,9 +293,9 @@
  * Thread v1.0.0 specification; incompatible changes to the specification
  * might still happen. For this reason, this is disabled by default.
  *
- * Requires: MBEDTLS_ECJPAKE_C or PSA_WANT_ALG_JPAKE
- *           SHA-256 (via MBEDTLS_SHA256_C or a PSA driver)
- *           MBEDTLS_ECP_DP_SECP256R1_ENABLED
+ * Requires: PSA_WANT_ALG_JPAKE
+ *           PSA_WANT_ALG_SHA_256
+ *           PSA_WANT_ECC_SECP_R1_256
  *
  * This enables the following ciphersuites (if other requisites are
  * enabled as well):
@@ -446,7 +409,7 @@
  * saved after the handshake to allow for more efficient serialization, so if
  * you don't need this feature you'll save RAM by disabling it.
  *
- * Requires: MBEDTLS_GCM_C or MBEDTLS_CCM_C or MBEDTLS_CHACHAPOLY_C
+ * Requires: PSA_WANT_ALG_GCM or PSA_WANT_ALG_CCM or PSA_WANT_ALG_CHACHA20_POLY1305
  *
  * Comment to disable the context serialization APIs.
  */
@@ -532,28 +495,6 @@
  * Uncomment to enable the Connection ID extension.
  */
 #define MBEDTLS_SSL_DTLS_CONNECTION_ID
-
-/**
- * \def MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT
- *
- * Defines whether RFC 9146 (default) or the legacy version
- * (version draft-ietf-tls-dtls-connection-id-05,
- * https://tools.ietf.org/html/draft-ietf-tls-dtls-connection-id-05)
- * is used.
- *
- * Set the value to 0 for the standard version, and
- * 1 for the legacy draft version.
- *
- * \deprecated Support for the legacy version of the DTLS
- *             Connection ID feature is deprecated. Please
- *             switch to the standardized version defined
- *             in RFC 9146 enabled by utilizing
- *             MBEDTLS_SSL_DTLS_CONNECTION_ID without use
- *             of MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT.
- *
- * Requires: MBEDTLS_SSL_DTLS_CONNECTION_ID
- */
-#define MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT 0
 
 /**
  * \def MBEDTLS_SSL_DTLS_HELLO_VERIFY
@@ -738,6 +679,20 @@
 //#define MBEDTLS_SSL_RECORD_SIZE_LIMIT
 
 /**
+ * \def MBEDTLS_SSL_KEYING_MATERIAL_EXPORT
+ *
+ * When this option is enabled, the client and server can extract additional
+ * shared symmetric keys after an SSL handshake using the function
+ * mbedtls_ssl_export_keying_material().
+ *
+ * The process for deriving the keys is specified in RFC 5705 for TLS 1.2 and
+ * in RFC 8446, Section 7.5, for TLS 1.3.
+ *
+ * Comment this macro to disable mbedtls_ssl_export_keying_material().
+ */
+#define MBEDTLS_SSL_KEYING_MATERIAL_EXPORT
+
+/**
  * \def MBEDTLS_SSL_RENEGOTIATION
  *
  * Enable support for TLS renegotiation.
@@ -810,7 +765,7 @@
  * Module:  library/ssl_ticket.c
  * Caller:
  *
- * Requires: MBEDTLS_GCM_C || MBEDTLS_CCM_C || MBEDTLS_CHACHAPOLY_C
+ * Requires: PSA_WANT_ALG_GCM or PSA_WANT_ALG_CCM or PSA_WANT_ALG_CHACHA20_POLY1305
  */
 #define MBEDTLS_SSL_TICKET_C
 
@@ -844,8 +799,8 @@
  * Requires: PSA_WANT_ALG_ECDH or PSA_WANT_ALG_FFDH
  *           MBEDTLS_X509_CRT_PARSE_C
  *           and at least one of:
- *               MBEDTLS_ECDSA_C or PSA_WANT_ALG_ECDSA
- *               MBEDTLS_PKCS1_V21
+ *               PSA_WANT_ALG_ECDSA
+ *               PSA_WANT_ALG_RSA_PSS
  *
  * Comment to disable support for the ephemeral key exchange mode in TLS 1.3.
  * If MBEDTLS_SSL_PROTO_TLS1_3 is not enabled, this option does not have any
@@ -889,7 +844,7 @@
  * Caller:  library/ssl*_client.c
  *          library/ssl*_server.c
  *
- * Requires: MBEDTLS_CIPHER_C, MBEDTLS_MD_C
+ * Requires: PSA_WANT_ALG_SHA_256 or PSA_WANT_ALG_SHA_384
  *           and at least one of the MBEDTLS_SSL_PROTO_XXX defines
  *
  * This module is required for SSL/TLS.
@@ -1086,9 +1041,9 @@
  *
  * Module:  library/pkcs7.c
  *
- * Requires: MBEDTLS_ASN1_PARSE_C, MBEDTLS_OID_C, MBEDTLS_PK_PARSE_C,
+ * Requires: MBEDTLS_ASN1_PARSE_C, MBEDTLS_PK_PARSE_C,
  *           MBEDTLS_X509_CRT_PARSE_C MBEDTLS_X509_CRL_PARSE_C,
- *           MBEDTLS_BIGNUM_C, MBEDTLS_MD_C
+ *           MBEDTLS_MD_C
  *
  * This module is required for the PKCS #7 parsing modules.
  */
@@ -1101,7 +1056,7 @@
  *
  * Module:  library/x509_create.c
  *
- * Requires: MBEDTLS_BIGNUM_C, MBEDTLS_OID_C, MBEDTLS_PK_PARSE_C,
+ * Requires: MBEDTLS_ASN1_WRITE_C, MBEDTLS_PK_PARSE_C
  *
  * \warning You must call psa_crypto_init() before doing any X.509 operation.
  *
@@ -1196,7 +1151,7 @@
  * Enable parsing and verification of X.509 certificates, CRLs and CSRS
  * signed with RSASSA-PSS (aka PKCS#1 v2.1).
  *
- * Requires: MBEDTLS_PKCS1_V21
+ * Requires: PSA_WANT_ALG_RSA_PSS
  *
  * Comment this macro to disallow using RSASSA-PSS in certificates.
  */
@@ -1233,7 +1188,7 @@
  *          library/x509_crt.c
  *          library/x509_csr.c
  *
- * Requires: MBEDTLS_ASN1_PARSE_C, MBEDTLS_BIGNUM_C, MBEDTLS_OID_C, MBEDTLS_PK_PARSE_C
+ * Requires: MBEDTLS_ASN1_PARSE_C, MBEDTLS_PK_PARSE_C
  *
  * \warning You must call psa_crypto_init() before doing any X.509 operation.
  *

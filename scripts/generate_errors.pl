@@ -36,9 +36,9 @@ if( @ARGV ) {
 my $error_format_file = $data_dir.'/error.fmt';
 
 my @low_level_modules = qw( AES ARIA ASN1 BASE64 BIGNUM
-                            CAMELLIA CCM CHACHA20 CHACHAPOLY CMAC CTR_DRBG DES
+                            CAMELLIA CCM CHACHA20 CHACHAPOLY CMAC CTR_DRBG
                             ENTROPY ERROR GCM HKDF HMAC_DRBG LMS MD5
-                            NET OID PBKDF2 PLATFORM POLY1305 RIPEMD160
+                            NET PBKDF2 PLATFORM POLY1305 RIPEMD160
                             SHA1 SHA256 SHA512 SHA3 THREADING );
 my @high_level_modules = qw( CIPHER ECP MD
                              PEM PK PKCS12 PKCS5
@@ -52,6 +52,10 @@ close(FORMAT_FILE);
 
 my @files = glob qq("$crypto_include_dir/*.h");
 push(@files, glob qq("$tls_include_dir/*.h"));
+
+push(@files, glob qq("$crypto_include_dir/private/*.h"));
+push(@files, glob qq("$tls_include_dir/private/*.h"));
+
 my @necessary_include_files;
 my @matches;
 foreach my $file (@files) {
@@ -85,7 +89,7 @@ foreach my $file (@files) {
         $description =~ s/^\s+//;
         $description =~ s/\n( *\*)? */ /g;
         $description =~ s/\.?\s+$//;
-        push @matches, [$name, $value, $description];
+        push @matches, [$name, $value, $description, scalar($file =~ /^.*private\/[^\/]+$/)];
         ++$found;
     }
     if ($found) {
@@ -96,8 +100,8 @@ foreach my $file (@files) {
     }
 }
 
-my $ll_old_define = "";
-my $hl_old_define = "";
+my @ll_old_define = ("", "", "");
+my @hl_old_define = ("", "", "");
 
 my $ll_code_check = "";
 my $hl_code_check = "";
@@ -109,7 +113,7 @@ my %error_codes_seen;
 
 foreach my $match (@matches)
 {
-    my ($error_name, $error_code, $description) = @$match;
+    my ($error_name, $error_code, $description, $is_private_header) = @$match;
 
     die "Duplicated error code: $error_code ($error_name)\n"
         if( $error_codes_seen{$error_code}++ );
@@ -129,6 +133,14 @@ foreach my $match (@matches)
     $define_name = "SSL_TLS" if ($define_name eq "SSL");
     $define_name = "PEM_PARSE,PEM_WRITE" if ($define_name eq "PEM");
     $define_name = "PKCS7" if ($define_name eq "PKCS7");
+    $define_name = "ALG_SHA3_224,ALG_SHA3_256,ALG_SHA3_384,ALG_SHA3_512"
+                   if ($define_name eq "SHA3");
+
+    my $define_prefix = "MBEDTLS_";
+    $define_prefix = "PSA_WANT_" if ($module_name eq "SHA3");
+
+    my $define_suffix = "_C";
+    $define_suffix = "" if ($module_name eq "SHA3");
 
     my $include_name = $module_name;
     $include_name =~ tr/A-Z/a-z/;
@@ -154,26 +166,30 @@ foreach my $match (@matches)
     if ($found_ll)
     {
         $code_check = \$ll_code_check;
-        $old_define = \$ll_old_define;
+        $old_define = \@ll_old_define;
         $white_space = '        ';
     }
     else
     {
         $code_check = \$hl_code_check;
-        $old_define = \$hl_old_define;
+        $old_define = \@hl_old_define;
         $white_space = '        ';
     }
 
-    if ($define_name ne ${$old_define})
+    my $old_define_name   = \${$old_define}[0];
+    my $old_define_prefix = \${$old_define}[1];
+    my $old_define_suffix = \${$old_define}[2];
+
+    if ($define_name ne ${$old_define_name})
     {
-        if (${$old_define} ne "")
+        if (${$old_define_name} ne "")
         {
             ${$code_check} .= "#endif /* ";
             $first = 0;
-            foreach my $dep (split(/,/, ${$old_define}))
+            foreach my $dep (split(/,/, ${$old_define_name}))
             {
-                ${$code_check} .= " || " if ($first++);
-                ${$code_check} .= "MBEDTLS_${dep}_C";
+                ${$code_check} .= " || \n          " if ($first++);
+                ${$code_check} .= "${$old_define_prefix}${dep}${$old_define_suffix}";
             }
             ${$code_check} .= " */\n\n";
         }
@@ -183,49 +199,56 @@ foreach my $match (@matches)
         $first = 0;
         foreach my $dep (split(/,/, ${define_name}))
         {
-            ${$code_check} .= " || " if ($first);
-            $headers       .= " || " if ($first++);
+            ${$code_check} .= " || \\\n    " if ($first);
+            $headers       .= " || \\\n    " if ($first++);
 
-            ${$code_check} .= "defined(MBEDTLS_${dep}_C)";
-            $headers       .= "defined(MBEDTLS_${dep}_C)" if
-                                                    ($include_name ne "");
+            ${$code_check} .= "defined(${define_prefix}${dep}${define_suffix})";
+            $headers       .= "defined(${define_prefix}${dep}${define_suffix})"
+                              if ($include_name ne "");
         }
         ${$code_check} .= "\n";
+
+        if ($is_private_header) {
+            $include_name = "private/" . $include_name;
+        }
+
         $headers .= "\n#include \"mbedtls/${include_name}.h\"\n".
                     "#endif\n\n" if ($include_name ne "");
-        ${$old_define} = $define_name;
+        ${$old_define_name}   = $define_name;
+        ${$old_define_prefix} = $define_prefix;
+        ${$old_define_suffix} = $define_suffix;
     }
 
     ${$code_check} .= "${white_space}case -($error_name):\n".
                       "${white_space}    return( \"$module_name - $description\" );\n"
 };
 
-if ($ll_old_define ne "")
+if ($ll_old_define[0] ne "")
 {
     $ll_code_check .= "#endif /* ";
     my $first = 0;
-    foreach my $dep (split(/,/, $ll_old_define))
+    foreach my $dep (split(/,/, $ll_old_define[0]))
     {
-        $ll_code_check .= " || " if ($first++);
-        $ll_code_check .= "MBEDTLS_${dep}_C";
+        $ll_code_check .= " || \n          " if ($first++);
+        $ll_code_check .= "${ll_old_define[1]}${dep}${ll_old_define[2]}";
     }
     $ll_code_check .= " */\n";
 }
-if ($hl_old_define ne "")
+if ($hl_old_define[0] ne "")
 {
     $hl_code_check .= "#endif /* ";
     my $first = 0;
-    foreach my $dep (split(/,/, $hl_old_define))
+    foreach my $dep (split(/,/, $hl_old_define[0]))
     {
-        $hl_code_check .= " || " if ($first++);
-        $hl_code_check .= "MBEDTLS_${dep}_C";
+        $hl_code_check .= " || \n          " if ($first++);
+        $hl_code_check .= "${hl_old_define[1]}${dep}${hl_old_define[2]}";
     }
     $hl_code_check .= " */\n";
 }
 
 $error_format =~ s/HEADER_INCLUDED\n/$headers/g;
-$error_format =~ s/LOW_LEVEL_CODE_CHECKS\n/$ll_code_check/g;
-$error_format =~ s/HIGH_LEVEL_CODE_CHECKS\n/$hl_code_check/g;
+$error_format =~ s/ *LOW_LEVEL_CODE_CHECKS\n/$ll_code_check/g;
+$error_format =~ s/ *HIGH_LEVEL_CODE_CHECKS\n/$hl_code_check/g;
 
 open(ERROR_FILE, ">$error_file") or die "Opening destination file '$error_file': $!";
 print ERROR_FILE $error_format;

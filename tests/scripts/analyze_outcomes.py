@@ -62,6 +62,12 @@ class CoverageTask(outcome_analysis.CoverageTask):
             # https://github.com/Mbed-TLS/mbedtls/issues/9586
             'Config: !MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED',
         ],
+        'test_suite_config.crypto_combinations': [
+            # New thing in crypto. Not intended to be tested separately
+            # in mbedtls.
+            # https://github.com/Mbed-TLS/mbedtls/issues/10300
+            'Config: entropy: NV seed only',
+        ],
         'test_suite_config.psa_boolean': [
             # We don't test with HMAC disabled.
             # https://github.com/Mbed-TLS/mbedtls/issues/9591
@@ -118,11 +124,6 @@ class CoverageTask(outcome_analysis.CoverageTask):
             # Untested platform-specific optimizations.
             # https://github.com/Mbed-TLS/mbedtls/issues/9588
             'Config: MBEDTLS_HAVE_SSE2',
-            # Obsolete configuration options, to be replaced by
-            # PSA entropy drivers.
-            # https://github.com/Mbed-TLS/mbedtls/issues/8150
-            'Config: MBEDTLS_NO_PLATFORM_ENTROPY',
-            'Config: MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES',
             # Untested aspect of the platform interface.
             # https://github.com/Mbed-TLS/mbedtls/issues/9589
             'Config: MBEDTLS_PLATFORM_NO_STD_FUNCTIONS',
@@ -131,8 +132,6 @@ class CoverageTask(outcome_analysis.CoverageTask):
             # MBEDTLS_PSA_CRYPTO_SPM as enabled. That's ok.
             'Config: MBEDTLS_PSA_CRYPTO_SPM',
             # We don't test on armv8 yet.
-            'Config: MBEDTLS_SHA256_USE_A64_CRYPTO_IF_PRESENT',
-            'Config: MBEDTLS_SHA256_USE_A64_CRYPTO_ONLY',
             'Config: MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_ONLY',
             'Config: MBEDTLS_SHA512_USE_A64_CRYPTO_ONLY',
             # We don't run test_suite_config when we test this.
@@ -231,7 +230,8 @@ class DriverVSReference_hash(outcome_analysis.DriverVSReference):
     REFERENCE = 'test_psa_crypto_config_reference_hash_use_psa'
     DRIVER = 'test_psa_crypto_config_accel_hash_use_psa'
     IGNORED_SUITES = [
-        'shax', 'mdx', # the software implementations that are being excluded
+        # the software implementations that are being excluded
+        'mdx', 'sha1', 'sha256', 'sha3', 'sha512', 'shax',
         'md.psa',  # purposefully depends on whether drivers are present
         'psa_crypto_low_hash.generated', # testing the builtins
     ]
@@ -253,7 +253,7 @@ class DriverVSReference_hmac(outcome_analysis.DriverVSReference):
     IGNORED_SUITES = [
         # These suites require legacy hash support, which is disabled
         # in the accelerated component.
-        'shax', 'mdx',
+        'mdx', 'sha1', 'sha256', 'sha3', 'sha512', 'shax',
         # This suite tests builtins directly, but these are missing
         # in the accelerated case.
         'psa_crypto_low_hash.generated',
@@ -293,15 +293,15 @@ class DriverVSReference_cipher_aead_cmac(outcome_analysis.DriverVSReference):
     IGNORED_SUITES = [
         # low-level (block/stream) cipher modules
         'aes', 'aria', 'camellia', 'des', 'chacha20',
-        # AEAD modes and CMAC
-        'ccm', 'chachapoly', 'cmac', 'gcm',
+        # AEAD modes, CMAC and POLY1305
+        'ccm', 'chachapoly', 'cmac', 'gcm', 'poly1305',
         # The Cipher abstraction layer
         'cipher',
     ]
     IGNORED_TESTS = {
         'test_suite_config': [
             re.compile(r'.*\bMBEDTLS_(AES|ARIA|CAMELLIA|CHACHA20|DES)_.*'),
-            re.compile(r'.*\bMBEDTLS_(CCM|CHACHAPOLY|CMAC|GCM)_.*'),
+            re.compile(r'.*\bMBEDTLS_(CCM|CHACHAPOLY|CMAC|GCM|POLY1305)_.*'),
             re.compile(r'.*\bMBEDTLS_AES(\w+)_C\b.*'),
             re.compile(r'.*\bMBEDTLS_CIPHER_.*'),
         ],
@@ -321,10 +321,6 @@ class DriverVSReference_cipher_aead_cmac(outcome_analysis.DriverVSReference):
         'test_suite_error': [
             'Low and high error',
             'Single low error'
-        ],
-        # Similar to test_suite_error above.
-        'test_suite_version': [
-            'Check for MBEDTLS_AES_C when already present',
         ],
         # The en/decryption part of PKCS#12 is not supported so far.
         # The rest of PKCS#12 (key derivation) works though.
@@ -569,6 +565,10 @@ class DriverVSReference_rsa(outcome_analysis.DriverVSReference):
         'pk', 'pkwrite', 'pkparse'
     ]
     IGNORED_TESTS = {
+        'test_suite_bignum.misc': [
+            re.compile(r'.*\bmbedtls_mpi_is_prime.*'),
+            re.compile(r'.*\bmbedtls_mpi_gen_prime.*'),
+        ],
         'test_suite_config': [
             re.compile(r'.*\bMBEDTLS_(PKCS1|RSA)_.*'),
             re.compile(r'.*\bMBEDTLS_GENPRIME\b.*')
@@ -649,10 +649,6 @@ class DriverVSReference_block_cipher_dispatch(outcome_analysis.DriverVSReference
             # really, just need to know some error code is there.
             'Single low error',
             'Low and high error',
-        ],
-        'test_suite_version': [
-            # Similar to test_suite_error above.
-            'Check for MBEDTLS_AES_C when already present',
         ],
         'test_suite_platform': [
             # Incompatible with sanitizers (e.g. ASan). If the driver

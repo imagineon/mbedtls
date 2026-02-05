@@ -359,13 +359,6 @@ add_openssl_ciphersuites()
 
         "ECDSA")
             CIPHERS="$CIPHERS                                   \
-                TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA             \
-                TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256          \
-                TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256          \
-                TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA             \
-                TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384          \
-                TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384          \
-                TLS_ECDH_ECDSA_WITH_NULL_SHA                    \
                 TLS_ECDHE_ECDSA_WITH_ARIA_128_GCM_SHA256        \
                 TLS_ECDHE_ECDSA_WITH_ARIA_256_GCM_SHA384        \
                 TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   \
@@ -468,14 +461,6 @@ add_mbedtls_ciphersuites()
 
         "ECDSA")
             M_CIPHERS="$M_CIPHERS                               \
-                TLS_ECDH_ECDSA_WITH_ARIA_128_CBC_SHA256         \
-                TLS_ECDH_ECDSA_WITH_ARIA_128_GCM_SHA256         \
-                TLS_ECDH_ECDSA_WITH_ARIA_256_CBC_SHA384         \
-                TLS_ECDH_ECDSA_WITH_ARIA_256_GCM_SHA384         \
-                TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256     \
-                TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256     \
-                TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384     \
-                TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384     \
                 TLS_ECDHE_ECDSA_WITH_ARIA_128_CBC_SHA256        \
                 TLS_ECDHE_ECDSA_WITH_ARIA_256_CBC_SHA384        \
                 "
@@ -597,11 +582,6 @@ setup_arguments()
     case $($OPENSSL ciphers ALL) in
         *ECDH-ECDSA*|*ECDH-RSA*) O_SUPPORT_STATIC_ECDH="YES";;
         *) O_SUPPORT_STATIC_ECDH="NO";;
-    esac
-
-    case $($OPENSSL ciphers ALL) in
-        *DES-CBC-*) O_SUPPORT_SINGLE_DES="YES";;
-        *) O_SUPPORT_SINGLE_DES="NO";;
     esac
 
     # OpenSSL <1.0.2 doesn't support DTLS 1.2. Check if OpenSSL

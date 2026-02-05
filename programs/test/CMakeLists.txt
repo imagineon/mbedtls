@@ -2,20 +2,16 @@ set(libs
     ${mbedtls_target}
 )
 
-set(executables_libs
+set(executables
     metatest
     query_compile_time_config
     query_included_headers
     selftest
     udp_proxy
-)
-add_dependencies(${programs_target} ${executables_libs})
-add_dependencies(${ssl_opt_target} udp_proxy)
-
-set(executables_mbedcrypto
     zeroize
 )
-add_dependencies(${programs_target} ${executables_mbedcrypto})
+add_dependencies(${programs_target} ${executables})
+add_dependencies(${ssl_opt_target} udp_proxy)
 add_dependencies(${ssl_opt_target} query_compile_time_config)
 
 if(TEST_CPP)
@@ -60,6 +56,7 @@ if(GEN_FILES)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../../tf-psa-crypto/include/psa/crypto_config.h
                 ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/data_files/query_config.fmt
                 ${CMAKE_CURRENT_BINARY_DIR}/query_config.c
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../..
         DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/generate_query_config.pl
             ${CMAKE_CURRENT_SOURCE_DIR}/../../include/mbedtls/mbedtls_config.h
@@ -74,7 +71,7 @@ else()
     link_to_source(query_config.c)
 endif()
 
-foreach(exe IN LISTS executables_libs executables_mbedcrypto)
+foreach(exe IN LISTS executables)
     set(source ${exe}.c)
     set(extra_sources "")
     if(NOT EXISTS ${source} AND
@@ -102,16 +99,13 @@ foreach(exe IN LISTS executables_libs executables_mbedcrypto)
 
     # Request C11, required for memory poisoning
     set_target_properties(${exe} PROPERTIES C_STANDARD 11)
-
-    # This emulates "if ( ... IN_LIST ... )" which becomes available in CMake 3.3
-    list(FIND executables_libs ${exe} exe_index)
-    if (${exe_index} GREATER -1)
-        target_link_libraries(${exe} ${libs} ${CMAKE_THREAD_LIBS_INIT})
-    else()
-        target_link_libraries(${exe} ${tfpsacrypto_target} ${CMAKE_THREAD_LIBS_INIT})
-    endif()
+    target_link_libraries(${exe} ${libs} ${CMAKE_THREAD_LIBS_INIT})
 endforeach()
 
-install(TARGETS ${executables_libs} ${executables_mbedcrypto}
+target_include_directories(metatest
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tf-psa-crypto/drivers/builtin/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../tf-psa-crypto/drivers/builtin/src)
+
+install(TARGETS ${executables}
         DESTINATION "bin"
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
